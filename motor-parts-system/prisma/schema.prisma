@@ -1,0 +1,287 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Users {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique @db.VarChar(50)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @db.VarChar(255)
+  phoneNumber  String?  @db.VarChar(20)
+  role         UserRole @default(agent)
+  isActive     Boolean  @default(true)
+  sourceConfig Json?    // Client source configuration: { sources: [{ originCode: string, enabled: boolean, profitPercent: number }] }
+  identification String? @db.VarChar(50) // Client identification (NIT, ID, etc.) for fetching from service API
+  clientType    Int?     // Client type code (0-9) for pricing and product information
+  searchAllowed Boolean  @default(true) // If false, client cannot perform reference searches (blocked/on hold)
+  allowOrdersWithOverduePortfolio Boolean @default(false) // Admin override: allow creating orders even with overdue portfolio
+  searchQuotaLimit Int?   // Max searches since last order; null = unlimited. Resets when client places an order.
+  // Credit (enabled, limit, days): Filipo-Web `clients` only — use getFilipoClientCreditForUserId / GET /api/v1/customers
+  passwordResetToken         String?   @db.VarChar(255) // SHA-256 hash of reset token; plain token sent by email
+  passwordResetTokenExpiresAt DateTime? // When the reset token expires (e.g. 1 hour)
+  // Extended client registration fields (person/company, location, marketing survey)
+  isCompany          Boolean? @default(false) // true = company, false = natural person
+  clientName         String?  @db.VarChar(255) // Display name: person name or company name
+  phoneCountryCode   String?  @db.VarChar(50)  // Increased from 10 to handle longer inputs or mis-formatted entries
+  country            String?  @db.VarChar(100)
+  stateOrDepartment  String?  @db.VarChar(100)
+  city               String?  @db.VarChar(100)
+  address            String?  @db.Text
+  marketingSource    String?  @db.VarChar(100) // How they heard about us
+  surveyCatPct       Int?     // % machines CAT (0-100)
+  surveyKomatsuPct   Int?     // % machines Komatsu (0-100)
+  surveyJohnDeerePct Int?     // % machines John Deere (0-100)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  // quotes       Quotes[] // Commented out to allow agentId = 0 in Quotes
+  orders       Orders[]
+
+  @@index([username])
+  @@index([email])
+  @@index([role])
+  @@index([identification])
+  @@index([clientType])
+}
+
+model SearchLogs {
+  id             Int      @id @default(autoincrement())
+  searchTerm     String   @db.VarChar(100)
+  timestamp      DateTime @default(now())
+  hasStock       Boolean  @default(false)
+  userType       UserType
+  sessionId      String   @db.VarChar(100)
+  userId         Int?
+  userAgent      String?  @db.VarChar(500)
+  ipAddress      String?  @db.VarChar(45)
+  resultCount    Int      @default(0)
+  searchDuration Int?
+
+  @@index([searchTerm])
+  @@index([timestamp])
+  @@index([userType])
+  @@index([userId])
+  @@index([sessionId])
+}
+
+model UserSessions {
+  id          Int       @id @default(autoincrement())
+  sessionId   String    @unique @db.VarChar(100)
+  userId      Int?
+  userType    UserType
+  startTime   DateTime  @default(now())
+  endTime     DateTime?
+  isActive    Boolean   @default(true)
+  searchCount Int       @default(0)
+  quoteCount  Int       @default(0)
+
+  @@index([sessionId])
+  @@index([userId])
+  @@index([startTime])
+}
+
+model Quotes {
+  id              Int         @id @default(autoincrement())
+  agentId         Int         @default(0)
+  clientId        Int?
+  items           Json
+  status          QuoteStatus @default(running)
+  pdfPath         String?     @db.VarChar(500)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  clientName      String?     @db.VarChar(255)
+  clientType      Int?
+  discountAmount  Decimal?    @db.Decimal(12, 2)
+  discountPercent Decimal?    @db.Decimal(5, 2)
+  ivaAmount       Decimal?    @db.Decimal(12, 2)
+  ivaPercent      Decimal?    @db.Decimal(5, 2)
+  totalAmount     Decimal     @default(0) @db.Decimal(12, 2)
+  observations    String?     @db.Text
+  createdByClient Boolean     @default(false)
+  // cancellationReason String?  @db.VarChar(500) // Temporarily commented out
+
+  // Relations - commented out to allow agentId = 0
+  // agent           Users?      @relation(fields: [agentId], references: [id])
+
+  @@index([agentId])
+  @@index([clientId])
+  @@index([clientName])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model QuoteLogs {
+  id           Int         @id @default(autoincrement())
+  quoteId      Int         @unique
+  status       QuoteStatus
+  timestamp    DateTime    @default(now())
+  clientId     Int?
+  agentId      Int         @default(0)
+  totalAmount  Decimal     @db.Decimal(12, 2)
+  itemCount    Int         @default(0)
+  followUpDate DateTime?
+  notes        String?
+
+  @@index([quoteId])
+  @@index([status])
+  @@index([timestamp])
+  @@index([clientId])
+  @@index([agentId])
+}
+
+enum UserType {
+  agent
+  client
+  admin
+}
+
+enum UserRole {
+  admin
+  agent
+  client
+}
+
+model Configuration {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique @db.VarChar(100)
+  value       Decimal  @db.Decimal(10, 4)
+  description String?  @db.VarChar(255)
+  category    String   @db.VarChar(50)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([key])
+  @@index([category])
+}
+
+enum QuoteStatus {
+  running
+  hot
+  warm
+  cold
+  closed
+  cancelled
+}
+
+model Orders {
+  id              Int         @id @default(autoincrement())
+  clientId        Int         // Required for orders (client who placed the order)
+  items           Json
+  status          OrderStatus @default(pending)
+  pdfPath         String?     @db.VarChar(500)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  clientName      String?     @db.VarChar(255)
+  clientType      Int?
+  discountAmount  Decimal?    @db.Decimal(12, 2)
+  discountPercent Decimal?    @db.Decimal(5, 2)
+  ivaAmount       Decimal?    @db.Decimal(12, 2)
+  ivaPercent      Decimal?    @db.Decimal(5, 2)
+  totalAmount     Decimal     @default(0) @db.Decimal(12, 2)
+  observations    String?     @db.Text
+  orderName       String?     @db.VarChar(255) // Name/number client uses to identify the purchase
+  dispatchType    String?     @db.VarChar(50) // 'pickup' | 'international_carrier'
+  pickupEntity    String?     @db.VarChar(255) // Who picks up (Person or Company) - when pickup
+  pickupName      String?     @db.VarChar(255) // Name - when pickup
+  carrierName     String?     @db.VarChar(255) // Carrier name - when international_carrier
+  carrierAddress  String?     @db.Text
+  carrierPhone    String?     @db.VarChar(50)
+  carrierContactName String?  @db.VarChar(255)
+  paymentMethod   String?     @db.VarChar(50) // 'credit_line' | 'transfer' | 'zelle'
+  paymentStatus   String      @default("pending_payment") @db.VarChar(50) // 'pending_payment' | 'paid' | 'failed' | 'not_required'
+  stripeCheckoutSessionId String? @unique @db.VarChar(255)
+  stripePaymentIntentId   String? @db.VarChar(255)
+
+  // Relations
+  client          Users       @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@index([clientName])
+  @@index([status])
+  @@index([createdAt])
+  @@index([paymentStatus])
+}
+
+model StripeWebhookEvents {
+  id          Int      @id @default(autoincrement())
+  eventId     String   @unique @db.VarChar(255)
+  eventType   String   @db.VarChar(100)
+  status      String   @default("processed") @db.VarChar(50)
+  error       String?
+  createdAt   DateTime @default(now())
+  processedAt DateTime?
+
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model IpmachKnowledge {
+  id        BigInt                 @id @default(autoincrement())
+  content   String
+  embedding Unsupported("vector")
+  source    String                 @default("catalog") @db.VarChar(100)
+  type      String                 @default("catalog") @db.VarChar(50)
+  metadata  Json?
+  createdAt DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([source, type], map: "ipmach_knowledge_source_type_idx")
+  @@map("ipmach_knowledge")
+}
+
+enum OrderStatus {
+  pending
+  confirmed
+  processing
+  shipped
+  delivered
+  cancelled
+}
+
+model DeepWebEndpoint {
+  id                Int            @id @default(autoincrement())
+  originCode        String         @unique @db.VarChar(50)
+  name              String         @db.VarChar(255)
+  url               String         @db.Text
+  method            HttpMethod     @default(GET)
+  token             String?        @db.VarChar(500)
+  tokenHeaderName   String?        @db.VarChar(100)
+  tokenPlacement    TokenPlacement @default(header)
+  requestBodyTemplate String?      @db.Text
+  isActive          Boolean        @default(true)
+  parserConfig      Json?
+  timeoutMs         Int            @default(40000)
+  retryAttempts     Int            @default(1)
+  waitForSelector   String?        @db.VarChar(200)
+  requiresLogin     Boolean        @default(false)
+  loginUrl          String?        @db.Text
+  loginUsername     String?        @db.VarChar(255)
+  loginPassword     String?        @db.VarChar(255)
+  loginFormSelector  String?        @db.VarChar(200)
+  usernameField     String?        @db.VarChar(100)
+  passwordField     String?        @db.VarChar(100)
+  loginSteps        Json?          // Combined login and search steps: [{ type: "goto"|"fill"|"click"|"wait"|"select"|"press", selector?: string, value?: string, url?: string, options?: object }]. Use {{username}}, {{password}}, and {{reference}} placeholders. If already logged in, login portion will be skipped automatically.
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([originCode])
+  @@index([isActive])
+}
+
+enum HttpMethod {
+  GET
+  POST
+}
+
+enum TokenPlacement {
+  header
+  query
+  body
+}
