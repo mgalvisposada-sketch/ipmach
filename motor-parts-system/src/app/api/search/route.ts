@@ -17,7 +17,12 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { reference, clientType } = await request.json();
+        let { reference, clientType } = await request.json();
+        
+        // Ensure reference is uppercase for all search types
+        if (reference) {
+            reference = String(reference).toUpperCase().trim();
+        }
 
         if (!reference) {
             return NextResponse.json(
@@ -57,7 +62,12 @@ export async function POST(request: NextRequest) {
 
             if (costexResponse.ok) {
                 const costexData = await costexResponse.json();
-                costexResults = costexData.data ? [costexData.data] : [];
+                const payload = costexData.data;
+                costexResults = Array.isArray(payload)
+                    ? payload
+                    : payload != null
+                      ? [payload]
+                      : [];
                 console.log('[SEARCH] Costex result:', {
                     success: costexData.success,
                     partNumber: costexResults[0]?.partNumber ?? reference,
@@ -78,8 +88,13 @@ export async function POST(request: NextRequest) {
                     console.warn('[SEARCH] Got HTML 404 — internal URL may be wrong. Ensure NEXTAUTH_URL matches the app origin or the app runs on the fallback port.');
                 }
             }
-        } catch (error) {
-            console.error('Costex API call failed:', error);
+        } catch (error: any) {
+            console.error('Costex API call failed:', {
+                message: error.message,
+                code: error.code,
+                baseUrl,
+                target: `${baseUrl}/api/search/costex`
+            });
         }
 
         const hasStock = costexResults.some((r: any) => (r?.totalStock ?? 0) > 0);
@@ -99,6 +114,12 @@ export async function POST(request: NextRequest) {
                 resultCount,
                 searchDuration: Math.floor(Math.random() * 500) + 100,
             },
+        });
+
+        console.log(`[SEARCH] Returning results for "${reference}":`, {
+            success: true,
+            externalResultsCount: costexResults.length,
+            hasStock
         });
 
         return NextResponse.json({

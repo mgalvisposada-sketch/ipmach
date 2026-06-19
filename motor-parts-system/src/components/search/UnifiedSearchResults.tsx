@@ -23,6 +23,8 @@ interface ExternalResult {
 interface UnifiedResult {
     id: string;
     reference: string;
+    /** Costex branch code when source is Costex (e.g. "01", "05"). */
+    costexLocationCode?: string;
     stockQty: number;
     priceCOP: number;
     /** When USD (e.g. Costex), display and use this amount as price in USD */
@@ -63,7 +65,8 @@ interface UnifiedSearchResultsProps {
         quantity?: number,
         shouldClearResults?: boolean,
         baseCost?: number,
-        weightPoundsPerUnit?: number
+        weightPoundsPerUnit?: number,
+        costexLocationCode?: string
     ) => void;
     onClearResults?: () => void;
     clientId?: number;
@@ -119,9 +122,15 @@ export function UnifiedSearchResults({
         const priceCurrency: 'USD' | 'COP' = isCostexUSD ? 'USD' : 'COP';
         const costUSD = data.baseCostUSD ?? data.calculation?.inputs?.baseCostUSD;
 
+        const locSuffix =
+            typeof data.sourceLocationCode === 'string' && data.sourceLocationCode.trim() !== ''
+                ? `-${data.sourceLocationCode}`
+                : '';
         return {
-            id: `external-${index}`,
+            id: `external-${index}${locSuffix}`,
             reference: data.partNumber,
+            costexLocationCode:
+                typeof data.sourceLocationCode === 'string' ? data.sourceLocationCode : undefined,
             stockQty: data.totalStock,
             priceCOP: displayPrice,
             priceCurrency,
@@ -208,14 +217,15 @@ export function UnifiedSearchResults({
                                 result.location,
                                 result.stockQty,
                                 result.description,
-                                undefined, // origin
+                                'costex',
                                 undefined, // brand
-                                quantity, // Agregar parametro de cantidad
-                                false, // don't clear results
-                                result.costUSD, // raw cost (e.g. Costex baseCostUSD)
+                                quantity,
+                                false,
+                                result.costUSD,
                                 typeof result.weight?.pounds === 'number' && Number.isFinite(result.weight.pounds)
                                     ? result.weight.pounds
-                                    : undefined
+                                    : undefined,
+                                result.costexLocationCode
                             );
                             toast.success(`${quantity} unidad(es) de ${result.reference} agregadas`);
                         }
@@ -353,15 +363,18 @@ export function UnifiedSearchResults({
                                                     showThirdPartyForm.result.location,
                                                     showThirdPartyForm.result.stockQty,
                                                     thirdPartyDescription.trim() || undefined,
-                                                    undefined, // origin
+                                                    showThirdPartyForm.result.sourceName === 'Costex'
+                                                        ? 'costex'
+                                                        : undefined,
                                                     thirdPartyBrand.trim() || undefined,
-                                                    1, // quantity
-                                                    true, // shouldClearResults
-                                                    showThirdPartyForm.result.costUSD, // baseCost for order integration
+                                                    1,
+                                                    true,
+                                                    showThirdPartyForm.result.costUSD,
                                                     typeof showThirdPartyForm.result.weight?.pounds === 'number' &&
                                                     Number.isFinite(showThirdPartyForm.result.weight.pounds)
                                                         ? showThirdPartyForm.result.weight.pounds
-                                                        : undefined
+                                                        : undefined,
+                                                    showThirdPartyForm.result.costexLocationCode
                                                 );
                                                 setShowThirdPartyForm({ isOpen: false, result: null });
                                                 setThirdPartyPrice(0);

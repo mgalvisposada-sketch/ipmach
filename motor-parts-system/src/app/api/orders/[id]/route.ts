@@ -4,6 +4,10 @@ import { authOptions } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 import { prisma } from '@/lib/prisma';
+import {
+  getExternalPendingByClientUserId,
+  extractBilledMotorOrderIds,
+} from '@/lib/external-billing';
 
 export async function GET(
   request: NextRequest,
@@ -55,9 +59,18 @@ export async function GET(
       );
     }
 
+    let filipoBilled = false;
+    try {
+      const { billedOrders } = await getExternalPendingByClientUserId(order.clientId);
+      const billed = extractBilledMotorOrderIds(billedOrders);
+      filipoBilled = billed.has(order.id);
+    } catch {
+      filipoBilled = false;
+    }
+
     return NextResponse.json({
       success: true,
-      data: order,
+      data: { ...order, filipoBilled },
     });
 
   } catch (error: any) {

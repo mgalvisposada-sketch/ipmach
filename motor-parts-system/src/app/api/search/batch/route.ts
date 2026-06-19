@@ -30,6 +30,7 @@ interface ProductResult {
     source: 'costex' | 'deepweb' | 'internal';
     sourceName: string;
     origin?: string;
+    costexLocationCode?: string;
 }
 
 interface BatchSearchResultItem {
@@ -41,6 +42,15 @@ interface BatchSearchResultItem {
     source?: string;
     sourceName?: string;
     origin?: string;
+}
+
+function pickBestCostexRow(rows: any[]): any | null {
+    if (!rows || rows.length === 0) return null;
+    const withStock = rows.filter((r) => (r?.totalStock ?? 0) > 0);
+    const pool = withStock.length > 0 ? withStock : rows;
+    return pool.reduce((best, cur) =>
+        (cur?.totalStock ?? 0) > (best?.totalStock ?? 0) ? cur : best
+    );
 }
 
 /** Keeps concurrent internal /api/search/costex calls low so each one’s /api/config Prisma usage does not exhaust the pool. */
@@ -161,7 +171,18 @@ export async function POST(request: NextRequest) {
                     }
 
                     if (costexResult?.success && costexResult?.data) {
-                        const costexData = costexResult.data;
+                        const rows = Array.isArray(costexResult.data)
+                            ? costexResult.data
+                            : [costexResult.data];
+                        const costexData = pickBestCostexRow(rows);
+                        if (!costexData) {
+                            return {
+                                reference: item.reference,
+                                requestedQty: item.quantity,
+                                status: 'not_found',
+                                availableQty: 0,
+                            };
+                        }
                         const stock = costexData.totalStock || 0;
                         const price = costexData.minPriceUSD || costexData.minPriceCOP || 0;
 
@@ -184,6 +205,10 @@ export async function POST(request: NextRequest) {
                                 description: costexData.description || `Costex - ${item.reference}`,
                                 source: 'costex',
                                 sourceName: 'Costex',
+                                origin: 'costex',
+                                ...(typeof costexData.sourceLocationCode === 'string'
+                                    ? { costexLocationCode: costexData.sourceLocationCode }
+                                    : {}),
                             };
 
                             if (stock < item.quantity) {

@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { useSession } from 'next-auth/react';
 import { toast } from 'react-hot-toast';
+import { roundMoney2 } from '@/lib/utils';
 
 const QUOTE_STORAGE_BASE = 'motor-parts-quote';
 const QUOTE_MODE_STORAGE_BASE = 'motor-parts-quote-mode';
@@ -26,6 +27,8 @@ export interface QuoteItem {
     source?: 'internal' | 'third-party'; // Source of the item
     sourceName?: string; // Name of the third-party provider
     origin?: string; // Origin code (e.g., 'agrocosta', 'gecolsa') - hidden from clients
+    /** Costex warehouse code (e.g. "01", "05") when multiple Costex rows exist for the same reference. */
+    costexLocationCode?: string;
     brand?: string; // Brand name for external references
     /** Unit weight in pounds (e.g. Costex), for Miami carrier surcharge. */
     weightPoundsPerUnit?: number;
@@ -69,9 +72,9 @@ function parseAndNormalizeQuote(savedQuote: string): Quote | null {
         parsedQuote.createdAt = new Date(parsedQuote.createdAt);
         parsedQuote.updatedAt = new Date(parsedQuote.updatedAt);
         parsedQuote.items = (parsedQuote.items || []).map((item: any) => {
-            const unitPrice = item.clientPriceCOP || item.basePriceCOP || 0;
+            const unitPrice = roundMoney2(Number(item.clientPriceCOP || item.basePriceCOP || 0));
             const quantity = item.quantity || 1;
-            const totalPrice = unitPrice * quantity;
+            const totalPrice = roundMoney2(unitPrice * quantity);
             return {
                 ...item,
                 id: item.id || `${item.reference}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -79,7 +82,9 @@ function parseAndNormalizeQuote(savedQuote: string): Quote | null {
                 totalPrice,
             };
         });
-        parsedQuote.totalAmount = parsedQuote.items.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0);
+        parsedQuote.totalAmount = roundMoney2(
+            parsedQuote.items.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0)
+        );
         return parsedQuote as Quote;
     } catch {
         return null;
@@ -187,9 +192,9 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
         console.log('Adding item to quote:', item);
 
         // Always add as new item (allow multiple instances of same product)
-        const unitPrice = item.clientPriceCOP || item.basePriceCOP || 0;
+        const unitPrice = roundMoney2(Number(item.clientPriceCOP || item.basePriceCOP || 0));
         const finalQuantity = Math.max(1, quantity); // Usar la cantidad recibida, minimo 1
-        const totalPrice = unitPrice * finalQuantity;
+        const totalPrice = roundMoney2(unitPrice * finalQuantity);
 
         const newItem: QuoteItem = {
             ...item,
@@ -227,7 +232,7 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
                 const newQuote = {
                     id: `Q-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`.toUpperCase(),
                     items: [newItem],
-                    totalAmount: totalPrice,
+                    totalAmount: roundMoney2(totalPrice),
                     createdAt: new Date(),
                     updatedAt: new Date(),
                     ...preservedClientInfo,
@@ -242,7 +247,9 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
             const updatedQuote = {
                 ...prevQuote,
                 items: updatedItems,
-                totalAmount: updatedItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0),
+                totalAmount: roundMoney2(
+                    updatedItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0)
+                ),
                 updatedAt: new Date(),
                 // Preserve client information if it exists
                 clientId: prevQuote.clientId,
@@ -288,11 +295,13 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
             updatedQuote.items[itemIndex] = {
                 ...item,
                 quantity,
-                totalPrice: item.unitPrice * quantity,
+                totalPrice: roundMoney2(item.unitPrice * quantity),
             };
 
             // Recalculate total
-            updatedQuote.totalAmount = updatedQuote.items.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
+            updatedQuote.totalAmount = roundMoney2(
+                updatedQuote.items.reduce((sum, item) => sum + (item.totalPrice || 0), 0)
+            );
             updatedQuote.updatedAt = new Date();
 
             return updatedQuote;
@@ -311,16 +320,19 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
             const updatedQuote = { ...prevQuote };
             const item = updatedQuote.items[itemIndex];
 
+            const unit = roundMoney2(price);
             updatedQuote.items[itemIndex] = {
                 ...item,
-                unitPrice: price,
-                basePriceCOP: price,
-                clientPriceCOP: price, // For manual items, use the same price
-                totalPrice: price * item.quantity,
+                unitPrice: unit,
+                basePriceCOP: unit,
+                clientPriceCOP: unit, // For manual items, use the same price
+                totalPrice: roundMoney2(unit * item.quantity),
             };
 
             // Recalculate total
-            updatedQuote.totalAmount = updatedQuote.items.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
+            updatedQuote.totalAmount = roundMoney2(
+                updatedQuote.items.reduce((sum, item) => sum + (item.totalPrice || 0), 0)
+            );
             updatedQuote.updatedAt = new Date();
 
             return updatedQuote;
@@ -386,7 +398,9 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
             };
 
             // Recalculate total
-            updatedQuote.totalAmount = updatedQuote.items.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
+            updatedQuote.totalAmount = roundMoney2(
+                updatedQuote.items.reduce((sum, item) => sum + (item.totalPrice || 0), 0)
+            );
 
             console.log('Updated quote after removal:', updatedQuote);
 
@@ -442,8 +456,16 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
         try {
             const mappedItems: QuoteItem[] = (incoming.items || []).map((raw: any) => {
                 const quantity = typeof raw.quantity === 'number' && raw.quantity > 0 ? raw.quantity : 1;
-                const unitPrice = typeof raw.unitPrice === 'number' ? raw.unitPrice : (typeof raw.basePriceCOP === 'number' ? raw.basePriceCOP : 0);
-                const totalPrice = typeof raw.totalPrice === 'number' ? raw.totalPrice : unitPrice * quantity;
+                const unitPrice = roundMoney2(
+                    typeof raw.unitPrice === 'number'
+                        ? raw.unitPrice
+                        : typeof raw.basePriceCOP === 'number'
+                          ? raw.basePriceCOP
+                          : 0
+                );
+                const totalPrice = roundMoney2(
+                    typeof raw.totalPrice === 'number' ? Number(raw.totalPrice) : unitPrice * quantity
+                );
 
                 return {
                     id: raw.id || `${raw.reference || 'ITEM'}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -462,7 +484,9 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
                 };
             });
 
-            const totalAmount = mappedItems.reduce((sum, it) => sum + (typeof it.totalPrice === 'number' ? it.totalPrice : 0), 0);
+            const totalAmount = roundMoney2(
+                mappedItems.reduce((sum, it) => sum + (typeof it.totalPrice === 'number' ? it.totalPrice : 0), 0)
+            );
 
             const loaded: Quote = {
                 id: (incoming.id as string) || `Q-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`.toUpperCase(),

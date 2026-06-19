@@ -180,8 +180,8 @@ export default function FacturasPage() {
         <div>
           <h1 className="text-2xl font-bold text-ipmach-dark">Facturas</h1>
           <p className="text-sm text-gray-600 mt-1">
-            Historial de ventas y remisiones (cartera Filipo). Descarga el PDF con el mismo formato que en
-            documentos.
+            Historial de ventas y remisiones (cartera Filipo). El PDF se genera en Motor con el mismo formato
+            que las órdenes, usando el detalle devuelto por la API de documentos.
           </p>
         </div>
       </div>
@@ -214,7 +214,6 @@ export default function FacturasPage() {
                     <th className="px-3 py-2 text-right font-medium text-gray-700">Total</th>
                     <th className="px-3 py-2 text-right font-medium text-gray-700">Pagado</th>
                     <th className="px-3 py-2 text-right font-medium text-gray-700">Pendiente</th>
-                    <th className="px-3 py-2 text-left font-medium text-gray-700">Estado</th>
                     <th className="px-3 py-2 text-right font-medium text-gray-700">PDF</th>
                   </tr>
                 </thead>
@@ -238,13 +237,6 @@ export default function FacturasPage() {
                         {formatCurrency(inv.paid, 'USD')}
                       </td>
                       <td className="px-3 py-2 text-right">{formatCurrency(inv.pending, 'USD')}</td>
-                      <td className="px-3 py-2">
-                        {inv.fullyPaid ? (
-                          <span className="text-green-700">Pagado</span>
-                        ) : (
-                          <span className="text-amber-700">Pendiente</span>
-                        )}
-                      </td>
                       <td className="px-3 py-2 text-right">
                         {inv.externalId != null && String(inv.externalId).trim() !== '' ? (
                           <button

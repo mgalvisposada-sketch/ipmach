@@ -24,6 +24,50 @@ async function fetchWithTimeout(
   }
 }
 
+/** Same headers as manual validation: curl ... -H "X-API-Token: ..." (plus Accept JSON). */
+const UPSTREAM_INVOICES_HEADERS = (token: string): HeadersInit => ({
+  Accept: 'application/json',
+  'X-API-Token': token,
+});
+
+function isHtmlResponse(contentType: string | null, body: string): boolean {
+  const ct = (contentType || '').toLowerCase();
+  if (ct.includes('text/html')) return true;
+  const t = body.slice(0, 200).trim().toLowerCase();
+  return t.startsWith('<!doctype html') || t.startsWith('<html');
+}
+
+function upstreamRouteMissingMessage(
+  requestUrl: string,
+  status: number,
+  contentType: string | null
+): { error: string; details: Record<string, unknown> } {
+  const base = (() => {
+    try {
+      return new URL(requestUrl).origin;
+    } catch {
+      return '(invalid URL)';
+    }
+  })();
+  return {
+    error:
+      'Documents API returned HTML instead of JSON. The invoices route was not found on the upstream Next.js app (404 page).',
+    details: {
+      upstreamStatus: status,
+      upstreamUrl: requestUrl,
+      contentType,
+      hint:
+        'DOCUMENTS_API_BASE_URL must point to Filipo-Web where app/api/v1/clients/invoices/route.ts exists. ' +
+        'Wrong port, wrong project, or outdated checkout causes Next to serve HTML 404 — not a clientId/balanceFilter issue.',
+      validateWithCurl: [
+        `curl -sS -D - "${base}/api/v1/clients/invoices?clientId=test&balanceFilter=all" \\`,
+        `  -H "X-API-Token: <DOCUMENTS_API_TOKEN>" \\`,
+        `  -H "Accept: application/json"`,
+      ].join('\n'),
+    },
+  };
+}
+
 /**
  * GET /api/billing/invoices
  * Proxy to Filipo GET /api/v1/clients/invoices (receivable history).
@@ -87,11 +131,14 @@ export async function GET(request: NextRequest) {
     if (limit) url.searchParams.set('limit', limit);
     if (offset) url.searchParams.set('offset', offset);
 
+    const requestUrl = url.toString();
+    console.info('[billing/invoices] Upstream GET', requestUrl);
+
     const res = await fetchWithTimeout(
-      url.toString(),
+      requestUrl,
       {
         method: 'GET',
-        headers: { 'X-API-Token': token },
+        headers: UPSTREAM_INVOICES_HEADERS(token),
       },
       DOCUMENTS_API_TIMEOUT_MS
     );
@@ -100,14 +147,57 @@ export async function GET(request: NextRequest) {
     let data: unknown;
     try {
       data = text ? JSON.parse(text) : null;
-    } catch {
-      return NextResponse.json({ error: 'Invalid response from billing service' }, { status: 502 });
+    } catch (parseErr) {
+      const contentType = res.headers.get('content-type');
+      const preview = text.replace(/\s+/g, ' ').slice(0, 400);
+      const html = isHtmlResponse(contentType, text);
+
+      console.error('[billing/invoices] Upstream returned non-JSON:', {
+        status: res.status,
+        url: requestUrl,
+        contentType,
+        bodyPreview: preview || '(empty)',
+        parseError: parseErr instanceof Error ? parseErr.message : parseErr,
+        likelyNextHtml404: html && (res.status === 404 || res.status === 405),
+      });
+
+      if (html && (res.status === 404 || res.status === 405)) {
+        const payload = upstreamRouteMissingMessage(requestUrl, res.status, contentType);
+        return NextResponse.json(payload, { status: 502 });
+      }
+
+      return NextResponse.json(
+        {
+          error: 'Invalid response from billing service (not JSON)',
+          details: {
+            upstreamStatus: res.status,
+            contentType,
+            bodyPreview: preview || null,
+            upstreamUrl: requestUrl,
+          },
+        },
+        { status: 502 }
+      );
     }
 
     if (!res.ok) {
       const errBody = data as { error?: { message?: string } };
+      const message = errBody?.error?.message || res.statusText;
+      console.error('[billing/invoices] Upstream error:', {
+        status: res.status,
+        url: requestUrl,
+        message,
+        data: data && typeof data === 'object' ? data : String(data).slice(0, 500),
+      });
       return NextResponse.json(
-        { error: errBody?.error?.message || res.statusText, data },
+        {
+          error: message,
+          details: {
+            upstreamStatus: res.status,
+            upstreamUrl: requestUrl,
+          },
+          data,
+        },
         { status: res.status >= 500 ? 502 : res.status }
       );
     }
@@ -115,9 +205,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(data);
   } catch (err) {
     const isAbort = err instanceof Error && err.name === 'AbortError';
-    console.error('[billing/invoices] Error:', isAbort ? 'timeout' : err);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[billing/invoices] Fetch failed:', {
+      reason: isAbort ? 'timeout' : 'network_or_other',
+      message: msg,
+      cause: err instanceof Error && 'cause' in err ? String((err as Error & { cause?: unknown }).cause) : undefined,
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     return NextResponse.json(
-      { error: isAbort ? 'Request timed out' : 'Failed to fetch invoices' },
+      {
+        error: isAbort ? 'Request timed out' : `Failed to fetch invoices: ${msg}`,
+        details: { reason: isAbort ? 'timeout' : 'fetch_error' },
+      },
       { status: 502 }
     );
   }

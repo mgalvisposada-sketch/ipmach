@@ -5,6 +5,42 @@ export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
 }
 
+/** Round monetary amount to 2 decimal places (USD line totals and aggregates). */
+export function roundMoney2(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.round(value * 100) / 100;
+}
+
+/**
+ * Normalize quote line items: unit price and line total rounded to 2 decimals
+ * so per-line totals match sum of unit × quantity and match displayed currency.
+ */
+export function normalizeQuoteItemsForStorage(items: unknown[]): Record<string, unknown>[] {
+    if (!Array.isArray(items)) return [];
+    return items.map((raw) => {
+        const it = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+        const q = Number(typeof it.quantity === 'number' ? it.quantity : 1);
+        const quantity = Number.isFinite(q) && q > 0 ? q : 1;
+        const unitRaw =
+            typeof it.unitPrice === 'number'
+                ? it.unitPrice
+                : typeof it.basePriceCOP === 'number'
+                  ? it.basePriceCOP
+                  : 0;
+        const unitPrice = roundMoney2(Number(unitRaw));
+        const totalPrice = roundMoney2(unitPrice * quantity);
+        return { ...it, quantity, unitPrice, totalPrice };
+    });
+}
+
+export function sumQuoteLineTotals(items: Record<string, unknown>[]): number {
+    const sum = items.reduce((acc, it) => {
+        const t = typeof it.totalPrice === 'number' ? it.totalPrice : 0;
+        return acc + (Number.isFinite(t) ? t : 0);
+    }, 0);
+    return roundMoney2(sum);
+}
+
 export function formatCurrency(amount: number, currency: string = 'COP'): string {
     return new Intl.NumberFormat('en-US', {
         style: 'currency',

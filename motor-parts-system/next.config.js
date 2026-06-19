@@ -15,6 +15,20 @@ const nextConfig = {
   env: {
     CUSTOM_KEY: process.env.CUSTOM_KEY,
   },
+  async redirects() {
+    return [
+      {
+        source: '/pedidos',
+        destination: '/dashboard',
+        permanent: false,
+      },
+      {
+        source: '/pedidos/',
+        destination: '/dashboard',
+        permanent: false,
+      },
+    ];
+  },
   async headers() {
     return [
       {

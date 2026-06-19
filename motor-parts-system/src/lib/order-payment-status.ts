@@ -8,6 +8,8 @@ export type PaymentSummaryVariant = 'paid' | 'pending' | 'failed';
 export function getOrderPaymentSummaryLine(order: {
   paymentMethod?: string | null;
   paymentStatus?: string | null;
+  /** True when Documents API lists this Motor order id in billedOrderNumbers (tramitada en Filipo). */
+  filipoBilled?: boolean | null;
 }): { label: string; variant: PaymentSummaryVariant } {
   const pm = order.paymentMethod ?? '';
   const ps = order.paymentStatus ?? '';
@@ -27,6 +29,9 @@ export function getOrderPaymentSummaryLine(order: {
   }
 
   if (pm === PAYMENT_METHOD_CREDIT_LINE && ps === 'not_required') {
+    if (order.filipoBilled === true) {
+      return { label: 'Aprobada', variant: 'paid' };
+    }
     return { label: 'Pendiente de pago (crédito)', variant: 'pending' };
   }
 

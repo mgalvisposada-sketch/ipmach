@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import { XMarkIcon, DocumentTextIcon, TrashIcon } from '@heroicons/react/24/outline';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, roundMoney2 } from '@/lib/utils';
 import { useQuote } from '@/contexts/QuoteContext';
 
 interface SearchResult {
@@ -70,6 +70,9 @@ export function QuoteBuilder({ items, onClose, agentId, clientId, isEditing = fa
             }
             // Otherwise it's a SearchResult, convert it
             console.log('Item is SearchResult, converting:', item);
+            const unit = roundMoney2(
+                Number(clientId && item.clientPriceCOP ? item.clientPriceCOP : item.basePriceCOP)
+            );
             return {
                 id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
                 reference: item.reference,
@@ -80,8 +83,8 @@ export function QuoteBuilder({ items, onClose, agentId, clientId, isEditing = fa
                 location: item.location,
                 description: item.description,
                 quantity: 1,
-                unitPrice: clientId && item.clientPriceCOP ? item.clientPriceCOP : item.basePriceCOP,
-                totalPrice: clientId && item.clientPriceCOP ? item.clientPriceCOP : item.basePriceCOP,
+                unitPrice: unit,
+                totalPrice: roundMoney2(unit),
                 isManual: false,
                 source: 'internal'
             };
@@ -111,7 +114,7 @@ export function QuoteBuilder({ items, onClose, agentId, clientId, isEditing = fa
         // Update local state for immediate UI feedback
         setQuoteItems(prev => prev.map(item =>
             item.id === itemId
-                ? { ...item, quantity, totalPrice: item.unitPrice * quantity }
+                ? { ...item, quantity, totalPrice: roundMoney2(item.unitPrice * quantity) }
                 : item
         ));
 
@@ -127,10 +130,10 @@ export function QuoteBuilder({ items, onClose, agentId, clientId, isEditing = fa
             item.id === itemId
                 ? {
                     ...item,
-                    unitPrice: newPrice,
-                    basePriceCOP: newPrice,
-                    clientPriceCOP: clientId ? newPrice : undefined,
-                    totalPrice: newPrice * item.quantity
+                    unitPrice: roundMoney2(newPrice),
+                    basePriceCOP: roundMoney2(newPrice),
+                    clientPriceCOP: clientId ? roundMoney2(newPrice) : undefined,
+                    totalPrice: roundMoney2(newPrice * item.quantity)
                 }
                 : item
         ));
@@ -149,7 +152,9 @@ export function QuoteBuilder({ items, onClose, agentId, clientId, isEditing = fa
         removeItemFromQuote(itemId);
     };
 
-    const totalAmount = quoteItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
+    const totalAmount = roundMoney2(
+        quoteItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0)
+    );
 
     const handleCreateOrUpdateQuote = async () => {
         if (quoteItems.length === 0) {

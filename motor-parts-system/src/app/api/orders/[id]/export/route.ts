@@ -76,6 +76,7 @@ export async function GET(
                 city: true,
                 stateOrDepartment: true,
                 country: true,
+                incoterm: true,
             },
         });
 

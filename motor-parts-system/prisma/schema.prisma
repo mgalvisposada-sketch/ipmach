@@ -3,9 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Users {
@@ -37,6 +36,7 @@ model Users {
   surveyCatPct       Int?     // % machines CAT (0-100)
   surveyKomatsuPct   Int?     // % machines Komatsu (0-100)
   surveyJohnDeerePct Int?     // % machines John Deere (0-100)
+  incoterm           String?  @db.VarChar(32) // Commercial term with client (e.g. EXW, FOB); shown on order/invoice PDFs
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

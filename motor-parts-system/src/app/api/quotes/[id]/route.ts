@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 import { prisma } from '@/lib/prisma';
+import { normalizeQuoteItemsForStorage, sumQuoteLineTotals } from '@/lib/utils';
 
 // Helper function to validate and round decimal amounts
 // Decimal(12, 2) allows max 9,999,999,999.99
@@ -91,27 +92,15 @@ export async function PATCH(
             return NextResponse.json({ error: 'Quote not found' }, { status: 404 });
         }
 
-        // Use request items if provided, otherwise use existing items
-        const items: any[] = requestItems && Array.isArray(requestItems)
-            ? requestItems
-            : Array.isArray(existing.items as any)
-                ? ((existing.items as unknown) as any[])
-                : [];
+        const rawItems: unknown[] =
+            requestItems && Array.isArray(requestItems)
+                ? requestItems
+                : Array.isArray(existing.items as any)
+                  ? ((existing.items as unknown) as unknown[])
+                  : [];
 
-        const subtotal = items.reduce((sum, it) => {
-            const quantity = Number(typeof it?.quantity === 'number' ? it.quantity : 1);
-            const unit = Number(
-                typeof it?.unitPrice === 'number'
-                    ? it.unitPrice
-                    : typeof it?.basePriceCOP === 'number'
-                        ? it.basePriceCOP
-                        : 0
-            );
-            const total = Number(
-                typeof it?.totalPrice === 'number' ? it.totalPrice : unit * quantity
-            );
-            return sum + (Number.isFinite(total) ? total : 0);
-        }, 0);
+        const items = normalizeQuoteItemsForStorage(rawItems) as any[];
+        const subtotal = sumQuoteLineTotals(items);
 
         // Use provided values or fall back to existing values
         const finalDiscountPercent = discountPercent !== undefined ? discountPercent : (existing.discountPercent ? Number(existing.discountPercent) : 0);
@@ -163,7 +152,7 @@ export async function PATCH(
             where: { id: quoteId },
             data: {
                 ...(status && { status: status }),
-                ...(requestItems && { items: requestItems }),
+                ...(requestItems && { items }),
                 ...(observations !== undefined && { observations: observations || null }),
                 // Temporarily commented out - cancellation reason handling
                 // ...(status === 'cancelled' && cancellationReason && { cancellationReason: cancellationReason.trim() }),

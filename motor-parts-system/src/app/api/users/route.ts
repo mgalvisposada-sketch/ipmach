@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
             surveyJohnDeerePct,
             hasCredit,
             creditLimit,
+            incoterm,
         } = body;
 
         // Validate required fields (body is Record<string, unknown>)
@@ -129,6 +130,10 @@ export async function POST(request: NextRequest) {
             surveyCatPct: surveyCatPct !== undefined && surveyCatPct !== null && surveyCatPct !== '' ? Number(surveyCatPct) : undefined,
             surveyKomatsuPct: surveyKomatsuPct !== undefined && surveyKomatsuPct !== null && surveyKomatsuPct !== '' ? Number(surveyKomatsuPct) : undefined,
             surveyJohnDeerePct: surveyJohnDeerePct !== undefined && surveyJohnDeerePct !== null && surveyJohnDeerePct !== '' ? Number(surveyJohnDeerePct) : undefined,
+            incoterm:
+                role === 'client' && typeof incoterm === 'string'
+                    ? incoterm.trim().slice(0, 32) || null
+                    : undefined,
         });
 
         if (!result.success) {

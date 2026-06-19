@@ -122,6 +122,7 @@ export interface CreateUserExtended {
     surveyCatPct?: number;
     surveyKomatsuPct?: number;
     surveyJohnDeerePct?: number;
+    incoterm?: string | null;
 }
 
 export async function createUser(userData: CreateUserExtended) {
@@ -149,6 +150,7 @@ export async function createUser(userData: CreateUserExtended) {
                 surveyCatPct: userData.surveyCatPct,
                 surveyKomatsuPct: userData.surveyKomatsuPct,
                 surveyJohnDeerePct: userData.surveyJohnDeerePct,
+                incoterm: userData.incoterm?.trim() || null,
                 allowOrdersWithOverduePortfolio: false,
             },
         });
@@ -182,6 +184,7 @@ export async function updateUser(userId: number, userData: {
     surveyKomatsuPct?: number | null;
     surveyJohnDeerePct?: number | null;
     allowOrdersWithOverduePortfolio?: boolean;
+    incoterm?: string | null;
 }) {
     try {
         const updateData: any = {
@@ -269,6 +272,7 @@ export async function getAllUsers() {
                 surveyKomatsuPct: true,
                 surveyJohnDeerePct: true,
                 allowOrdersWithOverduePortfolio: true,
+                incoterm: true,
             },
             orderBy: {
                 createdAt: 'desc',
@@ -318,6 +322,7 @@ export async function getUserById(userId: number) {
                 surveyKomatsuPct: true,
                 surveyJohnDeerePct: true,
                 allowOrdersWithOverduePortfolio: true,
+                incoterm: true,
             },
         });
 

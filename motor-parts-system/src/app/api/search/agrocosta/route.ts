@@ -19,9 +19,12 @@ export async function GET(request: NextRequest) {
         }
 
         const { searchParams } = new URL(request.url);
-        const reference = searchParams.get('reference');
+        let reference = searchParams.get('reference');
+        if (reference) {
+            reference = reference.toUpperCase().trim();
+        }
 
-        if (!reference || !reference.trim()) {
+        if (!reference) {
             return NextResponse.json({ error: 'Reference parameter is required' }, { status: 400 });
         }
 
@@ -52,9 +55,13 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const { reference } = await request.json();
+        let { reference } = await request.json();
 
-        if (!reference || typeof reference !== 'string' || !reference.trim()) {
+        if (reference) {
+            reference = String(reference).toUpperCase().trim();
+        }
+
+        if (!reference) {
             return NextResponse.json({ error: 'Reference is required' }, { status: 400 });
         }
 

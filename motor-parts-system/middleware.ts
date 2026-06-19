@@ -6,6 +6,11 @@ export default withAuth(
     const token = req.nextauth.token;
     const { pathname } = req.nextUrl;
 
+    // Legacy URL: no app route at /pedidos — redirect before auth/route matching (fixes 404 in production when config redirects run after middleware).
+    if (pathname === '/pedidos' || pathname === '/pedidos/') {
+      return NextResponse.redirect(new URL('/dashboard', req.url));
+    }
+
     // Public routes that don't require authentication (landing, login, register, ipmach, forgot/reset password)
     const publicPaths = ['/', '/login', '/register', '/ipmach', '/forgot-password', '/reset-password'];
     if (publicPaths.some(path => pathname === path || pathname.startsWith(path + '/'))) {
@@ -75,6 +80,10 @@ export default withAuth(
     callbacks: {
       authorized: ({ req, token }) => {
         const pathname = req.nextUrl.pathname;
+        // Allow /pedidos through so middleware can redirect to /dashboard (withAuth would block before inner middleware otherwise).
+        if (pathname === '/pedidos' || pathname === '/pedidos/') {
+          return true;
+        }
         const isPublic = pathname === '/' || pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname === '/reset-password' || pathname.startsWith('/ipmach');
         if (pathname.startsWith('/api/payments/stripe-return')) {
           return true;

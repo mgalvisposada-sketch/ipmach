@@ -128,6 +128,12 @@ interface Order {
     paymentMethod?: string | null;
     /** Stripe / internal: pending_payment | paid | failed | not_required */
     paymentStatus?: string | null;
+    /** Set by GET /api/orders when Filipo lists this order in billedOrderNumbers */
+    filipoBilled?: boolean;
+    /** The total amount of the order as it appears in Filipo-Web */
+    filipoTotal?: number | null;
+    /** Whether the order exists in Filipo (even if not billed yet) */
+    filipoExists?: boolean;
     client?: {
         id: number;
         username: string;
@@ -258,30 +264,6 @@ export default function OrdersPage() {
             return sum;
         } catch (_) {
             return 0;
-        }
-    };
-
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'pending': return 'bg-yellow-100 text-yellow-800';
-            case 'confirmed': return 'bg-blue-100 text-blue-800';
-            case 'processing': return 'bg-purple-100 text-purple-800';
-            case 'shipped': return 'bg-indigo-100 text-indigo-800';
-            case 'delivered': return 'bg-green-100 text-green-800';
-            case 'cancelled': return 'bg-red-100 text-red-800';
-            default: return 'bg-gray-100 text-gray-800';
-        }
-    };
-
-    const getStatusText = (status: string) => {
-        switch (status) {
-            case 'pending': return 'Pendiente';
-            case 'confirmed': return 'Confirmada';
-            case 'processing': return 'En Proceso';
-            case 'shipped': return 'Enviada';
-            case 'delivered': return 'Entregada';
-            case 'cancelled': return 'Cancelada';
-            default: return status;
         }
     };
 
@@ -452,14 +434,9 @@ export default function OrdersPage() {
                                 <div key={order.id} className="border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors">
                                     <div className="flex items-start justify-between">
                                         <div className="flex-1">
-                                            <div className="flex items-center space-x-3">
-                                                <h3 className="text-lg font-medium text-gray-900">
-                                                    Orden #{order.id}
-                                                </h3>
-                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(order.status)}`}>
-                                                    {getStatusText(order.status)}
-                                                </span>
-                                            </div>
+                                            <h3 className="text-lg font-medium text-gray-900">
+                                                Orden #{order.id}
+                                            </h3>
                                             <div className="mt-1.5">
                                                 {(() => {
                                                     const pay = getOrderPaymentSummaryLine(order);
@@ -502,6 +479,17 @@ export default function OrdersPage() {
                                                 <div className="text-lg font-semibold text-gray-900">
                                                     {formatCurrency(calcOrderTotal(order), 'USD')}
                                                 </div>
+                                                {isAdmin && order.filipoExists && (
+                                                    <div className="text-xs text-gray-500">
+                                                        Filipo: {formatCurrency(order.filipoTotal ?? 0, 'USD')}
+                                                        {order.filipoBilled && <span className="ml-1 text-green-600 font-medium">(Facturado)</span>}
+                                                    </div>
+                                                )}
+                                                {isAdmin && !order.filipoExists && (
+                                                    <div className="text-xs text-red-500 font-medium">
+                                                        No en Filipo
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="flex space-x-2">
                                                 <button
@@ -536,6 +524,7 @@ export default function OrdersPage() {
                     onExportPDF={() => handleExportPDF(selectedOrder)}
                     onOrderUpdated={fetchOrders}
                     isAdmin={isAdminOrAgent}
+                    actualIsAdmin={isAdmin}
                 />
             )}
         </div>
@@ -543,16 +532,37 @@ export default function OrdersPage() {
 }
 
 // Order Details Modal Component
-function OrderDetailsModal({ order, onClose, onExportPDF, onOrderUpdated, isAdmin }: {
+function OrderDetailsModal({ order, onClose, onExportPDF, onOrderUpdated, isAdmin, actualIsAdmin }: {
     order: Order;
     onClose: () => void;
     onExportPDF: () => void;
     onOrderUpdated: () => void;
-    isAdmin: boolean; // This now represents admin OR agent
+    isAdmin: boolean;
+    actualIsAdmin: boolean;
 }) {
     const [currentStatus, setCurrentStatus] = useState<string>(order.status);
     const [observations, setObservations] = useState<string>(order.observations || '');
     const [isRetryingStripe, setIsRetryingStripe] = useState(false);
+    const [isRecreating, setIsRecreating] = useState(false);
+
+    const handleRecreateInFilipo = async () => {
+        if (!confirm('¿Seguro que desea recrear esta orden en Filipo?')) return;
+        setIsRecreating(true);
+        try {
+            toast.loading('Sincronizando con Filipo...', { id: 'recreate-filipo' });
+            const res = await fetch(`/api/orders/${order.id}/recreate-in-filipo`, {
+                method: 'POST',
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Error al recrear la orden');
+            toast.success('Orden sincronizada con Filipo', { id: 'recreate-filipo' });
+            onOrderUpdated();
+        } catch (err: any) {
+            toast.error(err.message, { id: 'recreate-filipo' });
+        } finally {
+            setIsRecreating(false);
+        }
+    };
 
     const effectivePaymentStatus =
         order.paymentStatus ??
@@ -703,10 +713,29 @@ function OrderDetailsModal({ order, onClose, onExportPDF, onOrderUpdated, isAdmi
                                     )}
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700">Total</label>
                                     <p className="mt-1 text-lg font-semibold text-gray-900">
                                         {formatCurrency(calcOrderTotal(order), 'USD')}
                                     </p>
+                                    {actualIsAdmin && order.filipoExists && (
+                                        <p className="text-xs text-gray-500">
+                                            Total en Filipo: <span className="font-medium text-gray-700">{formatCurrency(order.filipoTotal ?? 0, 'USD')}</span>
+                                            {order.filipoBilled && <span className="ml-2 text-green-700 font-semibold">(Facturado en Filipo)</span>}
+                                        </p>
+                                    )}
+                                    {actualIsAdmin && !order.filipoExists && (
+                                        <div className="mt-2">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                                                No sincronizada con Filipo
+                                            </span>
+                                            <button
+                                                onClick={handleRecreateInFilipo}
+                                                disabled={isRecreating}
+                                                className="ml-2 text-xs text-blue-600 hover:text-blue-800 underline disabled:opacity-50"
+                                            >
+                                                {isRecreating ? 'Sincronizando...' : 'Sincronizar ahora'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                                 {(order.orderName || order.dispatchType || order.paymentMethod) && (
                                     <div className="sm:col-span-2 space-y-2">

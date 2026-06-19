@@ -611,7 +611,21 @@ export default function ClientSearchPage() {
         return allResults;
     };
 
-    const handleAddThirdPartySource = (reference: string, price: number, sourceName: string, location?: string, stockQty?: number, customDescription?: string, origin?: string, brand?: string, quantity: number = 1, shouldClearResults: boolean = true, baseCost?: number, weightPoundsPerUnit?: number) => {
+    const handleAddThirdPartySource = (
+        reference: string,
+        price: number,
+        sourceName: string,
+        location?: string,
+        stockQty?: number,
+        customDescription?: string,
+        origin?: string,
+        brand?: string,
+        quantity: number = 1,
+        shouldClearResults: boolean = true,
+        baseCost?: number,
+        weightPoundsPerUnit?: number,
+        costexLocationCode?: string
+    ) => {
         let description = customDescription;
         if (!description) {
             description = `Proveedor: ${sourceName}${location ? ` - ${location}` : ''}`;
@@ -629,6 +643,9 @@ export default function ClientSearchPage() {
             source: 'third-party',
             sourceName: sourceName,
             origin: origin, // Save origin code for admin view
+            ...(costexLocationCode != null && costexLocationCode !== ''
+                ? { costexLocationCode }
+                : {}),
             brand: brand,
             weightPoundsPerUnit,
         }, quantity); // Pasar cantidad aqui
@@ -692,7 +709,10 @@ export default function ClientSearchPage() {
                             description: result.product.description,
                             source: (isCostex || isDeepWeb) ? 'third-party' : 'internal',
                             sourceName: result.sourceName || 'Interno',
-                            origin: result.origin
+                            origin: result.product.origin ?? result.origin,
+                            ...(typeof result.product.costexLocationCode === 'string'
+                                ? { costexLocationCode: result.product.costexLocationCode }
+                                : {}),
                         }, quantityToAdd); // Usar cantidad correcta
                         addedCount++;
                     }
@@ -785,7 +805,10 @@ export default function ClientSearchPage() {
                         description: result.product.description,
                         source: (isCostex || isDeepWeb) ? 'third-party' : 'internal',
                         sourceName: result.sourceName || 'Interno',
-                        origin: result.origin
+                        origin: result.product.origin ?? result.origin,
+                        ...(typeof result.product.costexLocationCode === 'string'
+                            ? { costexLocationCode: result.product.costexLocationCode }
+                            : {}),
                     }, result.availableQty);
                 }
 

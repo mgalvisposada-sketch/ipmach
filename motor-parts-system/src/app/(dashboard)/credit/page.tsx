@@ -189,8 +189,8 @@ export default function ClientCreditPage() {
                 <h2 className="text-lg font-semibold">Crédito disponible</h2>
               </div>
               <p className="text-sm text-gray-600 mb-4">
-                Cupo total que Proshel tiene habilitado para tu cuenta, menos lo que ya está comprometido en cartera y
-                en órdenes abiertas en este sistema.
+                Cupo total que Proshel tiene habilitado para tu cuenta, menos la deuda general por ventas/facturación
+                (cartera Filipo). Las órdenes abiertas en esta plataforma no reducen este cupo por ahora.
               </p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="rounded-md bg-gray-50 p-4">
@@ -207,8 +207,8 @@ export default function ClientCreditPage() {
                 </div>
               </div>
               <p className="mt-4 text-xs text-gray-500 leading-relaxed">
-                <strong>Fórmula:</strong> cupo disponible = cupo total − deuda general (cartera) − suma de órdenes en
-                estado Pendiente o En proceso en esta plataforma.
+                <strong>Fórmula:</strong> cupo disponible = cupo total − deuda general (cartera / ventas en Filipo). Las
+                órdenes del portal no se restan del cupo en este cálculo.
               </p>
               {(() => {
                 const term = summary.creditDaysLimit ?? summary.creditPaymentTermDays;
@@ -257,8 +257,8 @@ export default function ClientCreditPage() {
               <h2 className="text-lg font-semibold">Órdenes que consumen cupo</h2>
             </div>
             <p className="text-sm text-gray-600 mb-4">
-              Pedidos creados aquí que siguen en <strong>Pendiente</strong> o <strong>En proceso</strong>. Su valor
-              total se resta del cupo disponible junto con la deuda general.
+              Pedidos en <strong>Pendiente</strong> o <strong>En proceso</strong> en este portal. Referencia interna
+              solamente: <strong>no reducen</strong> el cupo disponible (el cupo solo considera cartera por ventas).
             </p>
             <p className="mb-3 text-sm font-medium text-gray-800">
               Total en órdenes abiertas:{' '}

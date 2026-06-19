@@ -25,6 +25,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { AIAssistantWidget } from '@/components/ipmach/AIAssistantWidget';
 import { GlobalClientSearchBar } from '@/components/search/GlobalClientSearchBar';
+import { SUPPORT_WHATSAPP_HREF } from '@/lib/support-links';
 
 function QuoteIndicator({ isClientTheme = false }: { isClientTheme?: boolean }) {
     const { getQuoteItemCount, getQuoteTotal, currentQuote } = useQuote();
@@ -239,7 +240,7 @@ export default function DashboardLayoutClient({
                                     )}
                                 </div>
                                 <a
-                                    href="https://wa.me/573226774363"
+                                    href={SUPPORT_WHATSAPP_HREF}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center gap-1 rounded-md border border-green-600 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-50"

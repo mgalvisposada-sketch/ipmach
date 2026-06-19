@@ -45,6 +45,7 @@ interface User {
     surveyKomatsuPct?: number;
     surveyJohnDeerePct?: number;
     allowOrdersWithOverduePortfolio?: boolean;
+    incoterm?: string | null;
 }
 
 interface Source {
@@ -84,6 +85,7 @@ export function UserManagement({ userRole }: UserManagementProps) {
         surveyCatPct: undefined as number | undefined,
         surveyKomatsuPct: undefined as number | undefined,
         surveyJohnDeerePct: undefined as number | undefined,
+        incoterm: '',
     });
 
     const [editForm, setEditForm] = useState({
@@ -112,6 +114,7 @@ export function UserManagement({ userRole }: UserManagementProps) {
         surveyKomatsuPct: undefined as number | undefined,
         surveyJohnDeerePct: undefined as number | undefined,
         allowOrdersWithOverduePortfolio: false,
+        incoterm: '',
     });
 
     const [isLoadingClientInfo, setIsLoadingClientInfo] = useState(false);
@@ -301,6 +304,7 @@ export function UserManagement({ userRole }: UserManagementProps) {
             surveyJohnDeerePct: user.surveyJohnDeerePct,
             filipoCreditDaysLimit: undefined,
             allowOrdersWithOverduePortfolio: Boolean(user.allowOrdersWithOverduePortfolio),
+            incoterm: user.incoterm ?? '',
         });
 
         if (user.role === 'client') {
@@ -357,6 +361,7 @@ export function UserManagement({ userRole }: UserManagementProps) {
                 surveyCatPct: createForm.role === 'client' ? createForm.surveyCatPct : undefined,
                 surveyKomatsuPct: createForm.role === 'client' ? createForm.surveyKomatsuPct : undefined,
                 surveyJohnDeerePct: createForm.role === 'client' ? createForm.surveyJohnDeerePct : undefined,
+                incoterm: createForm.role === 'client' ? (createForm.incoterm?.trim() || undefined) : undefined,
             };
 
             const response = await fetch('/api/users', {
@@ -374,6 +379,7 @@ export function UserManagement({ userRole }: UserManagementProps) {
                 username: '', email: '', password: '', phoneNumber: '', role: 'agent', identification: '', clientType: undefined,
                 isCompany: false, clientName: '', phoneCountryCode: '+57', country: '', stateOrDepartment: '', city: '', address: '',
                 marketingSource: '', surveyCatPct: undefined, surveyKomatsuPct: undefined, surveyJohnDeerePct: undefined,
+                incoterm: '',
             });
             fetchUsers();
         } catch (error: any) {
@@ -578,6 +584,7 @@ export function UserManagement({ userRole }: UserManagementProps) {
                 submitData.surveyCatPct = editForm.surveyCatPct;
                 submitData.surveyKomatsuPct = editForm.surveyKomatsuPct;
                 submitData.surveyJohnDeerePct = editForm.surveyJohnDeerePct;
+                submitData.incoterm = editForm.incoterm?.trim() || null;
             }
 
             const response = await fetch(`/api/users/${editingUser.id}`, {
@@ -1091,6 +1098,17 @@ export function UserManagement({ userRole }: UserManagementProps) {
                                             <label className="block text-sm font-medium text-gray-700">Dirección</label>
                                             <input type="text" value={createForm.address} onChange={(e) => setCreateForm({ ...createForm, address: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="Calle 123 #45-67" />
                                         </div>
+                                        <div className="col-span-1 md:col-span-2">
+                                            <label className="block text-sm font-medium text-gray-700">Incoterm</label>
+                                            <input
+                                                type="text"
+                                                value={createForm.incoterm}
+                                                onChange={(e) => setCreateForm({ ...createForm, incoterm: e.target.value.slice(0, 32) })}
+                                                maxLength={32}
+                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                                placeholder="ej. EXW, FOB"
+                                            />
+                                        </div>
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700">¿Cómo se enteró de nosotros?</label>
                                             <select value={createForm.marketingSource} onChange={(e) => setCreateForm({ ...createForm, marketingSource: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
@@ -1392,6 +1410,18 @@ export function UserManagement({ userRole }: UserManagementProps) {
                                         <div className="col-span-1 md:col-span-2">
                                             <label className="block text-sm font-medium text-gray-700">Dirección</label>
                                             <input type="text" value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+                                        </div>
+                                        <div className="col-span-1 md:col-span-2">
+                                            <label className="block text-sm font-medium text-gray-700">Incoterm</label>
+                                            <input
+                                                type="text"
+                                                value={editForm.incoterm}
+                                                onChange={(e) => setEditForm({ ...editForm, incoterm: e.target.value.slice(0, 32) })}
+                                                maxLength={32}
+                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                                placeholder="ej. EXW, FOB"
+                                            />
+                                            <p className="mt-1 text-xs text-gray-500">Se muestra en PDF de órdenes y facturas (término comercial acordado).</p>
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700">¿Cómo se enteró?</label>

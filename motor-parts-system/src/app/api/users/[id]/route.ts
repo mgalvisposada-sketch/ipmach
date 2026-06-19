@@ -3,7 +3,7 @@ import { getUserById, updateUser, deleteUser } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/prisma';
 import { syncMotorUserToFilipo, type FilipoSyncCreditOptions, type FilipoSyncResult } from '@/lib/filipo-client-sync';
-import { getExternalPendingByClientUserId, extractBilledMotorOrderIds } from '@/lib/external-billing';
+import { getExternalPendingByClientUserId } from '@/lib/external-billing';
 import { getPortfolioBlockStateForClientUserId } from '@/lib/portfolio-receivables';
 import { getFilipoClientCreditForUserId } from '@/lib/filipo-client-credit';
 
@@ -54,19 +54,17 @@ export async function GET(
                 filipo != null ? filipo.creditDaysLimit : null;
 
             if (hasCreditLine && filipo) {
-                const { pendingAmount: externalDebt, billedOrderNumbers } =
-                    await getExternalPendingByClientUserId(userId);
-                const billedIds = extractBilledMotorOrderIds(billedOrderNumbers);
+                const { pendingAmount: externalDebt } = await getExternalPendingByClientUserId(userId);
                 const pendingSum = await prisma.orders.aggregate({
                     where: {
                         clientId: userId,
                         status: { in: ['pending', 'processing'] },
-                        ...(billedIds.size > 0 ? { id: { notIn: Array.from(billedIds) } } : {}),
                     },
                     _sum: { totalAmount: true },
                 });
-                const pendingOrdersSum = pendingSum._sum.totalAmount != null ? Number(pendingSum._sum.totalAmount) : 0;
-                const availableCredit = Math.max(0, creditLimitNum - externalDebt - pendingOrdersSum);
+                const pendingOrdersSum =
+                    pendingSum._sum.totalAmount != null ? Number(pendingSum._sum.totalAmount) : 0;
+                const availableCredit = Math.max(0, creditLimitNum - externalDebt);
                 (data as Record<string, unknown>).externalDebt = externalDebt;
                 (data as Record<string, unknown>).pendingOrdersSum = pendingOrdersSum;
                 (data as Record<string, unknown>).availableCredit = availableCredit;
@@ -141,6 +139,7 @@ export async function PUT(
             surveyKomatsuPct,
             surveyJohnDeerePct,
             allowOrdersWithOverduePortfolio,
+            incoterm,
         } = body;
 
         const filipoCreditOpts: FilipoSyncCreditOptions = { syncCredit: true };
@@ -264,6 +263,7 @@ export async function PUT(
                 typeof allowOrdersWithOverduePortfolio === 'boolean'
                     ? allowOrdersWithOverduePortfolio
                     : undefined,
+            incoterm: safeString(incoterm, 32) ?? undefined,
         });
 
         if (!result.success) {

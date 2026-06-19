@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { OrderStatus } from '@prisma/client';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
@@ -11,7 +12,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Credit and portfolio summary for the logged-in client only.
- * Used by the Crédito page: limit, external debt, open orders consuming quota, and line-level pending orders.
+ * Available credit = Filipo limit − external portfolio debt (sales); platform open orders are informational only.
  */
 export async function GET() {
   try {
@@ -43,11 +44,13 @@ export async function GET() {
 
     const { pendingAmount: externalDebt } = await getExternalPendingByClientUserId(userId);
 
+    const openOrdersWhere = {
+      clientId: userId,
+      status: { in: [OrderStatus.pending, OrderStatus.processing] },
+    };
+
     const pendingOrders = await prisma.orders.findMany({
-      where: {
-        clientId: userId,
-        status: { in: ['pending', 'processing'] },
-      },
+      where: openOrdersWhere,
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -60,18 +63,13 @@ export async function GET() {
     });
 
     const pendingSum = await prisma.orders.aggregate({
-      where: {
-        clientId: userId,
-        status: { in: ['pending', 'processing'] },
-      },
+      where: openOrdersWhere,
       _sum: { totalAmount: true },
     });
     const pendingOrdersSum =
-      pendingSum._sum.totalAmount != null ? Number(pendingSum._sum.totalAmount) : 0;
+      pendingSum._sum?.totalAmount != null ? Number(pendingSum._sum.totalAmount) : 0;
 
-    const availableCredit = hasCredit
-      ? Math.max(0, creditLimitNum - externalDebt - pendingOrdersSum)
-      : 0;
+    const availableCredit = hasCredit ? Math.max(0, creditLimitNum - externalDebt) : 0;
 
     const creditDaysLimit = filipo != null ? filipo.creditDaysLimit : null;
 

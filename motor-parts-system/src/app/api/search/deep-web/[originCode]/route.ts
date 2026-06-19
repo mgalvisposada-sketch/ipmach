@@ -56,7 +56,11 @@ export async function POST(
 
         const { originCode } = await params;
         originCodeForError = originCode;
-        const { reference, clientId, clientType } = await request.json();
+        let { reference, clientId, clientType } = await request.json();
+        
+        if (reference) {
+            reference = String(reference).toUpperCase().trim();
+        }
 
         if (!reference || typeof reference !== 'string' || !reference.trim()) {
             return NextResponse.json({ error: 'Reference is required' }, { status: 400 });

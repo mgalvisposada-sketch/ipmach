@@ -5,7 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, roundMoney2 } from '@/lib/utils';
 import { useQuote } from '@/contexts/QuoteContext';
 import {
     EyeIcon,
@@ -247,10 +247,12 @@ export default function QuotesPage() {
             const sum = (quote.items || []).reduce((acc: number, it: any) => {
                 const quantity = Number(typeof it.quantity === 'number' ? it.quantity : 1);
                 const unit = Number(typeof it.unitPrice === 'number' ? it.unitPrice : (typeof it.basePriceCOP === 'number' ? it.basePriceCOP : 0));
-                const total = Number(typeof it.totalPrice === 'number' ? it.totalPrice : unit * quantity);
-                return acc + (Number.isFinite(total) ? total : 0);
+                const line = roundMoney2(
+                    Number(typeof it.totalPrice === 'number' ? it.totalPrice : unit * quantity)
+                );
+                return acc + (Number.isFinite(line) ? line : 0);
             }, 0);
-            return sum;
+            return roundMoney2(sum);
         } catch (_) {
             return 0;
         }
@@ -652,10 +654,12 @@ function QuoteDetailsModal({ quote, onClose, onExportPDF, onQuoteUpdated }: {
             const sum = (q.items || []).reduce((acc: number, it: any) => {
                 const quantity = Number(typeof it.quantity === 'number' ? it.quantity : 1);
                 const unit = Number(typeof it.unitPrice === 'number' ? it.unitPrice : (typeof it.basePriceCOP === 'number' ? it.basePriceCOP : 0));
-                const total = Number(typeof it.totalPrice === 'number' ? it.totalPrice : unit * quantity);
-                return acc + (Number.isFinite(total) ? total : 0);
+                const line = roundMoney2(
+                    Number(typeof it.totalPrice === 'number' ? it.totalPrice : unit * quantity)
+                );
+                return acc + (Number.isFinite(line) ? line : 0);
             }, 0);
-            return sum;
+            return roundMoney2(sum);
         } catch (_) {
             return 0;
         }
@@ -665,9 +669,9 @@ function QuoteDetailsModal({ quote, onClose, onExportPDF, onQuoteUpdated }: {
         return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
     };
     const computeTotals = (q: Quote, discount: number) => {
-        const subtotal = calcQuoteTotal(q);
+        const subtotal = roundMoney2(calcQuoteTotal(q));
         const d = clampDiscount(discount);
-        const total = subtotal * (1 - d / 100);
+        const total = roundMoney2(subtotal * (1 - d / 100));
         return { subtotal, discountPercent: d, total };
     };
     const getStatusColor = (status: string) => {

@@ -90,17 +90,6 @@ function docPortfolioStatus(
   return { dueLabel, statusLabel: `Mora (${daysPastDue} d.)` };
 }
 
-function orderStatusLabel(status: string): string {
-  switch (status) {
-    case 'pending':
-      return 'Pendiente';
-    case 'processing':
-      return 'En proceso';
-    default:
-      return status;
-  }
-}
-
 export function PendingDebtDetail({
   isOpen,
   onClose,
@@ -333,7 +322,6 @@ export function PendingDebtDetail({
                                   <th className="px-3 py-2 text-left font-medium text-gray-500">Orden</th>
                                   <th className="px-3 py-2 text-left font-medium text-gray-500">Nombre</th>
                                   <th className="px-3 py-2 text-left font-medium text-gray-500">Fecha</th>
-                                  <th className="px-3 py-2 text-left font-medium text-gray-500">Estado</th>
                                   <th className="px-3 py-2 text-right font-medium text-gray-500">Total</th>
                                 </tr>
                               </thead>
@@ -356,7 +344,6 @@ export function PendingDebtDetail({
                                         year: 'numeric',
                                       })}
                                     </td>
-                                    <td className="px-3 py-2">{orderStatusLabel(o.status)}</td>
                                     <td className="px-3 py-2 text-right font-medium">
                                       {formatCurrency(o.totalAmount, 'USD')}
                                     </td>

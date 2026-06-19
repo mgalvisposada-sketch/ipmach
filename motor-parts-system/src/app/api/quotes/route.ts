@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 import { prisma } from '@/lib/prisma';
+import { normalizeQuoteItemsForStorage, sumQuoteLineTotals } from '@/lib/utils';
 
 // Helper function to validate and round decimal amounts
 // Decimal(12, 2) allows max 9,999,999,999.99
@@ -38,7 +39,6 @@ export async function POST(request: NextRequest) {
       clientId,
       clientName,
       clientType,
-      totalAmount,
       observations,
       createdByClient
     } = body;
@@ -51,17 +51,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!totalAmount || totalAmount <= 0) {
+    const normalizedItems = normalizeQuoteItemsForStorage(items);
+    const computedTotal = sumQuoteLineTotals(normalizedItems);
+    if (computedTotal <= 0) {
       return NextResponse.json(
         { error: 'Total amount must be greater than 0' },
         { status: 400 }
       );
     }
 
-    // Validate and round totalAmount
     let validatedTotalAmount: number;
     try {
-      validatedTotalAmount = validateAndRoundAmount(totalAmount);
+      validatedTotalAmount = validateAndRoundAmount(computedTotal);
     } catch (error: any) {
       return NextResponse.json(
         { error: error.message || 'Invalid total amount' },
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
         clientId: clientId ?? null,
         clientName: clientName ?? null,
         clientType: clientType ?? null,
-        items,
+        items: normalizedItems,
         status: 'running',
         totalAmount: validatedTotalAmount,
         observations: observations ?? null,

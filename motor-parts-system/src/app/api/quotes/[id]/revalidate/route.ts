@@ -5,6 +5,17 @@ import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
+function pickCostexRowForItem(rows: any[], preferredLocationCode?: string): any | undefined {
+    if (!rows?.length) return undefined;
+    if (preferredLocationCode) {
+        const matched = rows.find(
+            (r) => String(r?.sourceLocationCode ?? '') === String(preferredLocationCode)
+        );
+        if (matched) return matched;
+    }
+    return [...rows].sort((a, b) => (b?.totalStock ?? 0) - (a?.totalStock ?? 0))[0];
+}
+
 interface RevalidationChange {
     reference: string;
     oldPrice: number;
@@ -80,11 +91,22 @@ export async function POST(
 
                     if (response.ok) {
                         const data = await response.json();
-                        newPrice = data.data?.minPriceUSD || oldPrice;
-                        newStock = data.data?.totalStock || 0;
-                        const costUSD = data.data?.baseCostUSD ?? data.data?.calculation?.inputs?.baseCostUSD;
-                        if (typeof costUSD === 'number' && Number.isFinite(costUSD)) {
-                            newCost = costUSD;
+                        const payload = data.data;
+                        const rows = Array.isArray(payload)
+                            ? payload
+                            : payload != null
+                              ? [payload]
+                              : [];
+                        const preferred = item.costexLocationCode as string | undefined;
+                        const picked = pickCostexRowForItem(rows, preferred);
+                        if (picked) {
+                            newPrice = picked.minPriceUSD ?? oldPrice;
+                            newStock = picked.totalStock || 0;
+                            const costUSD =
+                                picked.baseCostUSD ?? picked.calculation?.inputs?.baseCostUSD;
+                            if (typeof costUSD === 'number' && Number.isFinite(costUSD)) {
+                                newCost = costUSD;
+                            }
                         }
                     }
                 } else if (origin) {

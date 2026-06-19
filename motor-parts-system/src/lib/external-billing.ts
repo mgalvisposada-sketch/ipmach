@@ -37,6 +37,7 @@ export type ExternalBillingClientPayload = {
   lastDocumentDate?: string | null;
   documents?: ExternalBillingDocument[];
   billedOrderNumbers?: string[];
+  billedOrders?: { orderNumber: string; total: number; billed: boolean; sourceOrderNumber?: string | null }[];
 };
 
 type BillingApiEnvelope = {
@@ -84,9 +85,16 @@ function normalizePayload(entry: Record<string, unknown> | null | undefined): Ex
         ? Number(entry.pendingAmount)
         : 0;
   const documents = normalizeDocuments(entry.documents);
-  const billedOrderNumbers = Array.isArray(entry.billedOrderNumbers)
-    ? (entry.billedOrderNumbers as unknown[]).filter((v): v is string => typeof v === 'string')
+
+  const billedOrders = Array.isArray(entry.billedOrders)
+    ? (entry.billedOrders as any[]).map(o => ({
+        orderNumber: String(o.orderNumber || ''),
+        total: Number(o.total) || 0,
+        billed: Boolean(o.billed),
+        sourceOrderNumber: o.sourceOrderNumber ? String(o.sourceOrderNumber) : null
+      }))
     : undefined;
+
   return {
     pendingAmount: Number.isFinite(pendingAmount) ? Math.max(0, pendingAmount) : 0,
     unpaidDocumentsCount:
@@ -107,7 +115,8 @@ function normalizePayload(entry: Record<string, unknown> | null | undefined): Ex
         ? (entry.lastDocumentDate as string | null)
         : undefined,
     documents,
-    billedOrderNumbers,
+    billedOrderNumbers: entry.billedOrderNumbers as string[] | undefined,
+    billedOrders,
   };
 }
 
@@ -199,25 +208,68 @@ export async function getExternalBillingForClientUserId(
  * Motor sends orderId as the leading numeric prefix of Filipo's orderNumber
  * (e.g. "21" or "21 - Pedido X"). Returns a Set of parsed numeric IDs.
  */
-export function extractBilledMotorOrderIds(billedOrderNumbers: string[] | undefined): Set<number> {
-  const ids = new Set<number>();
-  for (const n of billedOrderNumbers ?? []) {
-    const parsed = parseInt(n.split(' ')[0], 10);
-    if (!isNaN(parsed) && parsed > 0) ids.add(parsed);
+export function extractBilledMotorOrderIds(billedOrders: { orderNumber: string; total: number; billed: boolean; sourceOrderNumber?: string | null }[] | undefined): Map<number, { total: number; billed: boolean }> {
+  const map = new Map<number, { total: number; billed: boolean }>();
+  for (const o of billedOrders ?? []) {
+    // Prioritize clean sourceOrderNumber field
+    let motorId = o.sourceOrderNumber ? parseInt(o.sourceOrderNumber, 10) : NaN;
+    
+    // Fallback to parsing the orderNumber prefix
+    if (isNaN(motorId)) {
+      motorId = parseInt(o.orderNumber.split(' ')[0], 10);
+    }
+
+    if (!isNaN(motorId) && motorId > 0) {
+      map.set(motorId, { total: o.total, billed: o.billed });
+    }
   }
-  return ids;
+  return map;
 }
 
 export async function getExternalPendingByClientUserId(
   userId: number
-): Promise<{ pendingAmount: number; billedOrderNumbers?: string[]; error?: string }> {
+): Promise<{ pendingAmount: number; billedOrders?: { orderNumber: string; total: number; billed: boolean }[]; error?: string }> {
   const { payload, error } = await getExternalBillingForClientUserId(userId, 'summary');
   if (!payload) {
     return { pendingAmount: 0, error };
   }
   return {
     pendingAmount: payload.pendingAmount,
-    billedOrderNumbers: payload.billedOrderNumbers,
+    billedOrders: payload.billedOrders,
     error,
   };
+}
+
+/**
+ * Fetches all orders from Filipo's new external matching endpoint.
+ * Returns a Map of MotorOrderId -> { total, billed }
+ */
+export async function getAllFilipoOrdersForMatching(): Promise<Map<number, { total: number; billed: boolean }>> {
+  const baseUrl = process.env.DOCUMENTS_API_BASE_URL?.trim();
+  const token = process.env.DOCUMENTS_API_TOKEN?.trim();
+  if (!baseUrl || !token) return new Map();
+
+  const url = `${baseUrl.replace(/\/$/, '')}/api/v1/external/orders`;
+  console.log(`[EXTERNAL_BILLING] Syncing with Filipo: curl -X GET "${url}" -H "X-API-Token: ${token.substring(0, 5)}***"`);
+  try {
+    const res = await fetchWithTimeout(url, {
+      method: 'GET',
+      headers: { 'X-API-Token': token },
+    }, DOCUMENTS_API_TIMEOUT_MS);
+
+    if (!res.ok) return new Map();
+    const data = await res.json();
+    const filipoOrders = data.data?.orders || [];
+    
+    const map = new Map<number, { total: number; billed: boolean }>();
+    for (const o of filipoOrders) {
+      if (o.motorOrderId) {
+        map.set(o.motorOrderId, { total: o.total, billed: o.isBilled });
+      }
+    }
+    return map;
+  } catch (err) {
+    console.error('[external-billing] Global orders fetch failed:', err);
+    return new Map();
+  }
 }

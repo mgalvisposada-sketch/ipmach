@@ -1,4 +1,6 @@
 import nodemailer from 'nodemailer';
+import { isNonReceivingEmailDomain } from '@/lib/invalid-email-domains';
+import { SUPPORT_WHATSAPP_HREF } from '@/lib/support-links';
 
 const BASE_URL = process.env.NEXTAUTH_URL?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim() || 'http://localhost:3000';
 
@@ -50,6 +52,13 @@ function getTransportCached(): nodemailer.Transporter | null {
 }
 
 type Attachment = { filename: string; content: Buffer };
+
+function maskEmailForLog(email: string): string {
+  const [local, host] = email.split('@');
+  if (!host) return '***';
+  const maskedLocal = local.length <= 2 ? '***' : `${local.slice(0, 2)}***`;
+  return `${maskedLocal}@${host}`;
+}
 
 async function sendMail(options: {
   to: string;
@@ -166,6 +175,136 @@ export async function sendIPMachRegistrationNotification(
     subject: `[IPMach] Solicitud: ${safeRef} - ${safeName}`,
     html,
   });
+}
+
+function escapeHtml(text: string | null | undefined): string {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+export interface ClientRegistrationNotificationParams {
+  userId: number;
+  email: string;
+  clientName: string | null;
+  identification: string | null;
+  isCompany: boolean | null;
+  phoneCountryCode: string | null;
+  phoneNumber: string | null;
+  country: string | null;
+  stateOrDepartment: string | null;
+  city: string | null;
+  address: string | null;
+  marketingSource: string | null;
+  clientType: number | null;
+  filipoSyncOk: boolean;
+  filipoSyncError?: string | null;
+}
+
+/**
+ * Sends an internal notification when a client account is created via POST /api/auth/register.
+ * Requires SMTP env and EMAIL_NOTIFICATIONS["client_registration"].enabled === true.
+ * Set client_registration.to in EMAIL_NOTIFICATIONS to the admin inbox (e.g. proshel@proshelcorp.com).
+ */
+export async function sendClientRegistrationNotification(
+  params: ClientRegistrationNotificationParams
+): Promise<{ ok: boolean; error?: string }> {
+  const map = getNotificationMap();
+  if (map['client_registration']?.enabled !== true) {
+    return { ok: false, error: 'Notification disabled by configuration' };
+  }
+  const transport = getTransportCached();
+  if (!transport) {
+    console.warn('Email not sent: SMTP not configured.');
+    return { ok: false, error: 'Email service not configured' };
+  }
+
+  const recipient = map['client_registration']?.to?.trim() ?? '';
+  if (!recipient) {
+    return { ok: false, error: 'No recipient configured (set client_registration.to in EMAIL_NOTIFICATIONS)' };
+  }
+
+  const safeEmail = escapeHtml(params.email);
+  const filipoLine = params.filipoSyncOk
+    ? '<li><strong>Filipo sync:</strong> OK</li>'
+    : `<li><strong>Filipo sync:</strong> failed — ${escapeHtml(params.filipoSyncError ?? 'unknown')}</li>`;
+
+  const html = `
+    <p><strong>New client registration (platform)</strong></p>
+    <ul>
+      <li><strong>User ID:</strong> ${params.userId}</li>
+      <li><strong>Email:</strong> ${safeEmail}</li>
+      <li><strong>Display name:</strong> ${escapeHtml(params.clientName)}</li>
+      <li><strong>Company account:</strong> ${params.isCompany === true ? 'yes' : 'no'}</li>
+      <li><strong>Identification:</strong> ${escapeHtml(params.identification)}</li>
+      <li><strong>Client type:</strong> ${params.clientType ?? '—'}</li>
+      <li><strong>Phone:</strong> ${escapeHtml(params.phoneCountryCode)} ${escapeHtml(params.phoneNumber)}</li>
+      <li><strong>Location:</strong> ${escapeHtml(params.city)}, ${escapeHtml(params.stateOrDepartment)}, ${escapeHtml(params.country)}</li>
+      <li><strong>Address:</strong> ${escapeHtml(params.address)}</li>
+      <li><strong>Marketing source:</strong> ${escapeHtml(params.marketingSource)}</li>
+      ${filipoLine}
+    </ul>
+    <p><em>You can parameterize this account in the admin panel.</em></p>
+  `.trim();
+
+  const subjectLabel = params.clientName?.trim() || params.email;
+  return sendMail({
+    to: recipient,
+    subject: `[Proshel] New client: ${subjectLabel}`,
+    html,
+  });
+}
+
+/**
+ * Sends a welcome email to the client after platform registration.
+ * Requires SMTP env and EMAIL_NOTIFICATIONS["client_registration_welcome"].enabled === true.
+ */
+export async function sendClientRegistrationWelcomeEmail(
+  to: string,
+  clientDisplayName: string | null
+): Promise<{ ok: boolean; error?: string }> {
+  const map = getNotificationMap();
+  if (map['client_registration_welcome']?.enabled !== true) {
+    return { ok: false, error: 'Notification disabled by configuration' };
+  }
+  const transport = getTransportCached();
+  if (!transport) {
+    console.warn('Email not sent: SMTP not configured.');
+    return { ok: false, error: 'Email service not configured' };
+  }
+
+  if (isNonReceivingEmailDomain(to)) {
+    console.warn(
+      `[Client welcome] Skipped: ${maskEmailForLog(to)} — domain cannot receive inbound mail (welcome would bounce).`
+    );
+    return { ok: false, error: 'Recipient domain cannot receive mail' };
+  }
+
+  const trimmed = clientDisplayName?.trim();
+  const greetingName = trimmed ? escapeHtml(trimmed) : null;
+  const loginUrl = `${BASE_URL.replace(/\/$/, '')}/login`;
+
+  const html = `
+    <p>${greetingName ? `Hola, <strong>${greetingName}</strong>` : 'Hola'},</p>
+    <p>Te damos la bienvenida a <strong>PROSHEL CORP (IPMACH)</strong>. Este mensaje confirma que tu registro en nuestra plataforma se completó correctamente.</p>
+    <p>Desde ya puedes iniciar sesión, explorar el catálogo, buscar referencias y armar cotizaciones con tu cuenta. La interfaz está pensada para que encuentres piezas, revises disponibilidad y organices tu trabajo de compra en un solo lugar.</p>
+    <p><strong>Importante sobre precios:</strong> los valores que ves en línea pueden no reflejar aún las condiciones comerciales finales para tu país. Nuestro ejecutivo de cuenta debe completar la <strong>parametrización de tu cuenta</strong> (listas, márgenes y condiciones locales) para que obtengas el mejor esquema posible. Hasta entonces, considera las cotizaciones como orientativas.</p>
+    <p>Si tienes dudas o necesitas acompañamiento, escríbenos por WhatsApp usando el botón de contacto en la web o este enlace directo: <a href="${SUPPORT_WHATSAPP_HREF}" style="color:#0f0f0f;font-weight:600;">Contactar por WhatsApp</a>.</p>
+    <p>Para entrar a la plataforma: <a href="${loginUrl}" style="color:#0f0f0f;font-weight:600;">Iniciar sesión</a></p>
+    <p>Saludos,<br/>Equipo Proshel</p>
+  `.trim();
+
+  console.log(`[Client welcome] Sending to ${maskEmailForLog(to)}`);
+  const result = await sendMail({
+    to,
+    subject: 'Bienvenido a PROSHEL CORP (IPMACH) — confirmación de registro',
+    html,
+  });
+  if (result.ok) {
+    console.log(`[Client welcome] Sent successfully to ${maskEmailForLog(to)}`);
+  }
+  return result;
 }
 
 /**

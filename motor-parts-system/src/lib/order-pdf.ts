@@ -38,10 +38,30 @@ export interface ClientForPdf {
   city?: string | null;
   stateOrDepartment?: string | null;
   country?: string | null;
+  /** Commercial term with client (e.g. EXW); shown below document date when set. */
+  incoterm?: string | null;
 }
 
 export interface GenerateOrderPdfOptions {
   printReference?: boolean;
+  /** Header title (default: Order). Use Invoice / Delivery note for billing documents. */
+  headerTitle?: string;
+  detailsSectionTitle?: string;
+  documentNumberLabel?: string;
+  /** Shown after documentNumberLabel (default: order id). */
+  documentNumberValue?: string;
+  dateLabel?: string;
+  /** Right column on the date row (e.g. legal line). */
+  rightDetailCaption?: string;
+  /** When false, hides nombre / despacho / forma de pago (used for Filipo invoices). Default true. */
+  showDispatchAndPaymentDetails?: boolean;
+  /** When set, subtotal/discount/total rows use these values (e.g. Filipo document totals). */
+  totalsOverride?: {
+    subtotal: number;
+    discountAmount: number;
+    discountPercent: number;
+    total: number;
+  };
 }
 
 function toNum(value: unknown): number {
@@ -82,14 +102,15 @@ function drawOrderPageHeader(
   page: any,
   proshelLogo: unknown,
   ipmachLogo: unknown,
-  orderId: number,
+  _orderId: number,
   height: number,
   font: unknown,
   boldFont: unknown,
-  blue: unknown
+  blue: unknown,
+  headerTitle: string = 'Orden'
 ): number {
   const marginY = height - 60;
-  page.drawText('Orden', { x: 50, y: marginY, size: 24, font: boldFont, color: blue });
+  page.drawText(headerTitle, { x: 50, y: marginY, size: 24, font: boldFont, color: blue });
   const companyInfoY = marginY - 25;
   page.drawText('Proshel Corp', { x: 50, y: companyInfoY, size: 10, font: boldFont, color: rgb(0.2, 0.2, 0.2) });
   page.drawText('7768 NW 64th St', { x: 50, y: companyInfoY - 12, size: 10, font, color: rgb(0.3, 0.3, 0.3) });
@@ -133,15 +154,15 @@ function drawOrderTableHeaders(
   const headerTextY = yPosition;
   page.drawText('#', { x: 42, y: headerTextY, size: 10, font: boldFont, color: black });
   if (printReference) {
-    page.drawText('Referencia', { x: 65, y: headerTextY, size: 10, font: boldFont, color: black });
-    page.drawText('Descripción', { x: 150, y: headerTextY, size: 10, font: boldFont, color: black });
-    page.drawText('Cant.', { x: 350, y: headerTextY, size: 10, font: boldFont, color: black });
-    page.drawText('Precio Unit.', { x: 420, y: headerTextY, size: 10, font: boldFont, color: black });
+    page.drawText('Reference', { x: 65, y: headerTextY, size: 10, font: boldFont, color: black });
+    page.drawText('Description', { x: 150, y: headerTextY, size: 10, font: boldFont, color: black });
+    page.drawText('Qty.', { x: 350, y: headerTextY, size: 10, font: boldFont, color: black });
+    page.drawText('Unit price', { x: 420, y: headerTextY, size: 10, font: boldFont, color: black });
     page.drawText('Total', { x: 500, y: headerTextY, size: 10, font: boldFont, color: black });
   } else {
-    page.drawText('Descripción', { x: 65, y: headerTextY, size: 10, font: boldFont, color: black });
-    page.drawText('Cant.', { x: 320, y: headerTextY, size: 10, font: boldFont, color: black });
-    page.drawText('Precio Unit.', { x: 390, y: headerTextY, size: 10, font: boldFont, color: black });
+    page.drawText('Description', { x: 65, y: headerTextY, size: 10, font: boldFont, color: black });
+    page.drawText('Qty.', { x: 320, y: headerTextY, size: 10, font: boldFont, color: black });
+    page.drawText('Unit price', { x: 390, y: headerTextY, size: 10, font: boldFont, color: black });
     page.drawText('Total', { x: 480, y: headerTextY, size: 10, font: boldFont, color: black });
   }
   return yPosition - 25;
@@ -170,7 +191,7 @@ function drawPageNumber(
   font: { widthOfTextAtSize: (text: string, size: number) => number },
   gray: unknown
 ): void {
-  const pageText = `Página ${pageNumber} de ${totalPages}`;
+  const pageText = `Page ${pageNumber} of ${totalPages}`;
   const textWidth = font.widthOfTextAtSize(pageText, 8);
   page.drawText(pageText, { x: (595.28 - textWidth) / 2, y: 30, size: 8, font, color: gray });
 }
@@ -190,6 +211,14 @@ export async function generateOrderPdfBuffer(
   options: GenerateOrderPdfOptions = {}
 ): Promise<Buffer> {
   const printReference = options.printReference === true;
+  const headerTitle = options.headerTitle ?? 'Order';
+  const detailsSectionTitle = options.detailsSectionTitle ?? 'Order details';
+  const documentNumberLabel = options.documentNumberLabel ?? 'Order no.:';
+  const documentNumberValue = options.documentNumberValue ?? String(order.id);
+  const dateLabel = options.dateLabel ?? 'Order date:';
+  const rightDetailCaption =
+    options.rightDetailCaption ?? 'Valid per applicable terms and conditions';
+  const showDispatchAndPaymentDetails = options.showDispatchAndPaymentDetails !== false;
 
   const pdfDoc = await PDFDocument.create();
   let currentPage = pdfDoc.addPage([595.28, 841.89]);
@@ -219,7 +248,17 @@ export async function generateOrderPdfBuffer(
     console.error('Error loading logos for order PDF:', error);
   }
 
-  let yPosition = drawOrderPageHeader(currentPage, proshelLogo, ipmachLogo, order.id, height, font, boldFont, logoBlue);
+  let yPosition = drawOrderPageHeader(
+    currentPage,
+    proshelLogo,
+    ipmachLogo,
+    order.id,
+    height,
+    font,
+    boldFont,
+    logoBlue,
+    headerTitle
+  );
 
   yPosition -= 40;
   currentPage.drawRectangle({
@@ -278,31 +317,47 @@ export async function generateOrderPdfBuffer(
   }
 
   yPosition -= 110;
-  currentPage.drawText('Order details', { x: 50, y: yPosition, size: 10, font: boldFont, color: black });
-  currentPage.drawText(`Order no.: ${order.id}`, { x: 300, y: yPosition, size: 10, font, color: black });
+  currentPage.drawText(detailsSectionTitle, { x: 50, y: yPosition, size: 10, font: boldFont, color: black });
+  currentPage.drawText(`${documentNumberLabel} ${documentNumberValue}`, { x: 300, y: yPosition, size: 10, font, color: black });
   yPosition -= 15;
-  currentPage.drawText(`Order date: ${new Date(order.createdAt).toLocaleDateString('es-CO')}`, { x: 50, y: yPosition, size: 9, font, color: black });
-  currentPage.drawText('Orden válida según términos y condiciones', { x: 300, y: yPosition, size: 9, font, color: black });
-  yPosition -= 20;
+  currentPage.drawText(
+    `${dateLabel} ${new Date(order.createdAt).toLocaleDateString('en-US')}`,
+    { x: 50, y: yPosition, size: 9, font, color: black }
+  );
+  currentPage.drawText(rightDetailCaption, { x: 300, y: yPosition, size: 9, font, color: black });
+  yPosition -= 14;
+  const incotermTrimmed = client?.incoterm?.trim();
+  if (incotermTrimmed) {
+    currentPage.drawText(`Incoterm: ${sanitizeTextForPDF(incotermTrimmed)}`, {
+      x: 50,
+      y: yPosition,
+      size: 9,
+      font: boldFont,
+      color: black,
+    });
+    yPosition -= 12;
+  }
+  yPosition -= 6;
 
-  // Detalles de la orden: nombre, despacho, forma de pago
-  const hasOrderDetails = !!(order.orderName || order.dispatchType || order.paymentMethod);
+  // Order details: name, dispatch, payment
+  const hasOrderDetails =
+    showDispatchAndPaymentDetails && !!(order.orderName || order.dispatchType || order.paymentMethod);
   if (hasOrderDetails) {
-    currentPage.drawText('Detalles de la orden', { x: 50, y: yPosition, size: 10, font: boldFont, color: black });
+    currentPage.drawText('Order details', { x: 50, y: yPosition, size: 10, font: boldFont, color: black });
     yPosition -= 14;
 
     if (order.orderName?.trim()) {
-      currentPage.drawText(`Nombre: ${sanitizeTextForPDF(order.orderName)}`, { x: 50, y: yPosition, size: 9, font, color: black });
+      currentPage.drawText(`Name: ${sanitizeTextForPDF(order.orderName)}`, { x: 50, y: yPosition, size: 9, font, color: black });
       yPosition -= 12;
     }
 
     if (order.dispatchType?.trim()) {
       const dispatchLabel = order.dispatchType === 'pickup'
-        ? 'Cliente recoge en bodega IPMach'
+        ? 'Customer pickup at IPMach warehouse'
         : order.dispatchType === 'international_carrier'
-          ? 'IPMach envía a transportador (Miami)'
+          ? 'IPMach ships to carrier (Miami)'
           : order.dispatchType;
-      let dispatchLine = `Despacho: ${dispatchLabel}`;
+      let dispatchLine = `Dispatch: ${dispatchLabel}`;
       if (order.dispatchType === 'pickup' && (order.pickupEntity?.trim() || order.pickupName?.trim())) {
         dispatchLine += ` – ${[order.pickupEntity, order.pickupName].filter(Boolean).join(', ')}`;
       } else if (order.dispatchType === 'international_carrier' && order.carrierName?.trim()) {
@@ -320,15 +375,15 @@ export async function generateOrderPdfBuffer(
 
     if (order.paymentMethod?.trim()) {
       const paymentLabel = order.paymentMethod === 'credit_line'
-        ? 'Línea de crédito'
+        ? 'Credit line'
         : order.paymentMethod === 'transfer'
-          ? 'Transferencia Bancaria'
+          ? 'Bank transfer'
           : order.paymentMethod === 'zelle'
             ? 'Zelle'
             : order.paymentMethod === 'stripe'
-              ? 'Tarjeta (Stripe)'
+              ? 'Card (Stripe)'
             : order.paymentMethod;
-      currentPage.drawText(`Forma de pago: ${sanitizeTextForPDF(paymentLabel)}`, { x: 50, y: yPosition, size: 9, font, color: black });
+      currentPage.drawText(`Payment method: ${sanitizeTextForPDF(paymentLabel)}`, { x: 50, y: yPosition, size: 9, font, color: black });
       yPosition -= 12;
     }
 
@@ -349,9 +404,19 @@ export async function generateOrderPdfBuffer(
 
     if (yPosition < minYPosition) {
       currentPage = pdfDoc.addPage([595.28, 841.89]);
-      const newHeaderY = drawOrderPageHeader(currentPage, proshelLogo, ipmachLogo, order.id, height, font, boldFont, logoBlue);
+      const newHeaderY = drawOrderPageHeader(
+        currentPage,
+        proshelLogo,
+        ipmachLogo,
+        order.id,
+        height,
+        font,
+        boldFont,
+        logoBlue,
+        headerTitle
+      );
       yPosition = newHeaderY - ORDER_PDF_CONTINUATION_ITEMS_Y_OFFSET;
-      currentPage.drawText('ÍTEMS (continuación)', { x: 50, y: yPosition, size: 14, font: boldFont, color: logoBlue });
+      currentPage.drawText('ITEMS (continued)', { x: 50, y: yPosition, size: 14, font: boldFont, color: logoBlue });
       yPosition -= 20;
       yPosition = drawOrderTableHeaders(currentPage, yPosition, printReference, font, boldFont, black, lightGray);
     }
@@ -416,11 +481,21 @@ export async function generateOrderPdfBuffer(
 
   if (yPosition < 200) {
     currentPage = pdfDoc.addPage([595.28, 841.89]);
-    const newHeaderY = drawOrderPageHeader(currentPage, proshelLogo, ipmachLogo, order.id, height, font, boldFont, logoBlue);
+    const newHeaderY = drawOrderPageHeader(
+      currentPage,
+      proshelLogo,
+      ipmachLogo,
+      order.id,
+      height,
+      font,
+      boldFont,
+      logoBlue,
+      headerTitle
+    );
     yPosition = newHeaderY - 100;
   }
 
-  const subtotal = items.reduce((sum, it) => {
+  const summedSubtotal = items.reduce((sum, it) => {
     const q = toNum(it?.quantity);
     const unit = toNum(it?.unitPrice);
     const fallbackLine = unit * (q || 1);
@@ -428,16 +503,29 @@ export async function generateOrderPdfBuffer(
     return sum + (Number.isFinite(line) ? line : 0);
   }, 0);
 
-  const discountPercent = toNum(order.discountPercent);
-  const computedDiscountAmount = subtotal * (Math.max(0, discountPercent) / 100);
-  const discountAmount = toNum(order.discountAmount) >= 0 ? toNum(order.discountAmount) : computedDiscountAmount;
-  const total = Math.max(0, subtotal - Math.min(discountAmount, subtotal));
+  const override = options.totalsOverride;
+  let subtotal: number;
+  let discountPercent: number;
+  let discountAmount: number;
+  let total: number;
+  if (override && Number.isFinite(override.total)) {
+    subtotal = override.subtotal;
+    discountAmount = Math.max(0, override.discountAmount);
+    discountPercent = Math.max(0, override.discountPercent);
+    total = Math.max(0, override.total);
+  } else {
+    subtotal = summedSubtotal;
+    discountPercent = toNum(order.discountPercent);
+    const computedDiscountAmount = subtotal * (Math.max(0, discountPercent) / 100);
+    discountAmount = toNum(order.discountAmount) >= 0 ? toNum(order.discountAmount) : computedDiscountAmount;
+    total = Math.max(0, subtotal - Math.min(discountAmount, subtotal));
+  }
 
   yPosition -= 16;
   currentPage.drawText('Subtotal:', { x: 420, y: yPosition, size: 10, font, color: black });
   currentPage.drawText(formatCurrencyForPDF(subtotal), { x: 500, y: yPosition, size: 10, font, color: black });
   yPosition -= 16;
-  currentPage.drawText(`Descuento (${discountPercent.toFixed(1)}%):`, { x: 380, y: yPosition, size: 10, font, color: black });
+  currentPage.drawText(`Discount (${discountPercent.toFixed(1)}%):`, { x: 380, y: yPosition, size: 10, font, color: black });
   currentPage.drawText(`${discountAmount > 0 ? '-' : ''}${formatCurrencyForPDF(Math.abs(discountAmount))}`, { x: 500, y: yPosition, size: 10, font, color: black });
   yPosition -= 14;
   currentPage.drawLine({ start: { x: 350, y: yPosition }, end: { x: 555, y: yPosition }, thickness: 1, color: gray });
@@ -449,10 +537,20 @@ export async function generateOrderPdfBuffer(
     yPosition -= 50;
     if (yPosition < 100) {
       currentPage = pdfDoc.addPage([595.28, 841.89]);
-      const newHeaderY = drawOrderPageHeader(currentPage, proshelLogo, ipmachLogo, order.id, height, font, boldFont, logoBlue);
+      const newHeaderY = drawOrderPageHeader(
+        currentPage,
+        proshelLogo,
+        ipmachLogo,
+        order.id,
+        height,
+        font,
+        boldFont,
+        logoBlue,
+        headerTitle
+      );
       yPosition = newHeaderY - 100;
     }
-    currentPage.drawText('OBSERVACIONES:', { x: 50, y: yPosition, size: 12, font: boldFont, color: black });
+    currentPage.drawText('NOTES:', { x: 50, y: yPosition, size: 12, font: boldFont, color: black });
     yPosition -= 20;
     const sanitizedObservations = sanitizeTextForPDF(order.observations);
     const maxWidth = 500;
@@ -473,7 +571,17 @@ export async function generateOrderPdfBuffer(
     for (const line of lines) {
       if (yPosition < 50) {
         currentPage = pdfDoc.addPage([595.28, 841.89]);
-        const newHeaderY = drawOrderPageHeader(currentPage, proshelLogo, ipmachLogo, order.id, height, font, boldFont, logoBlue);
+        const newHeaderY = drawOrderPageHeader(
+          currentPage,
+          proshelLogo,
+          ipmachLogo,
+          order.id,
+          height,
+          font,
+          boldFont,
+          logoBlue,
+          headerTitle
+        );
         yPosition = newHeaderY - 50;
       }
       currentPage.drawText(sanitizeTextForPDF(line), { x: 50, y: yPosition, size: 10, font, color: black });
@@ -486,7 +594,7 @@ export async function generateOrderPdfBuffer(
     const page = pdfDoc.getPage(i);
     drawPageNumber(page, i + 1, totalPages, font, gray);
     if (i === totalPages - 1) {
-      page.drawText('Sistema de Repuestos - Motor Parts System', { x: 50, y: 15, size: 8, font, color: gray });
+      page.drawText('Spare parts system - Motor Parts System', { x: 50, y: 15, size: 8, font, color: gray });
     }
   }
 
