@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getClientSearchPolicy, getSearchDeniedReason } from '@/lib/client-search-policy';
+import { searchCostexPart } from '@/lib/costex-search';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -143,38 +144,15 @@ export async function POST(request: NextRequest) {
             `[BATCH-SEARCH] Processing ${references.length} references (concurrency=${BATCH_SEARCH_CONCURRENCY})`
         );
 
-        const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
-        const cookieHeader = request.headers.get('cookie') || '';
-
         const results = await runWithConcurrency(
             references,
             BATCH_SEARCH_CONCURRENCY,
             async (item): Promise<BatchSearchResultItem> => {
                 try {
-                    const costexResponse = await fetch(`${baseUrl}/api/search/costex`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Cookie: cookieHeader,
-                        },
-                        body: JSON.stringify({
-                            partNumber: item.reference,
-                            clientType,
-                        }),
-                    });
+                    const costexResult = await searchCostexPart(item.reference, clientType);
 
-                    let costexResult: any;
-                    try {
-                        costexResult = await costexResponse.json();
-                    } catch {
-                        costexResult = { success: false, error: 'Invalid JSON response' };
-                    }
-
-                    if (costexResult?.success && costexResult?.data) {
-                        const rows = Array.isArray(costexResult.data)
-                            ? costexResult.data
-                            : [costexResult.data];
-                        const costexData = pickBestCostexRow(rows);
+                    if (costexResult.success && costexResult.data.length > 0) {
+                        const costexData = pickBestCostexRow(costexResult.data);
                         if (!costexData) {
                             return {
                                 reference: item.reference,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { canClientSearch, getClientSearchPolicy, getSearchDeniedReason } from '@/lib/client-search-policy';
+import { searchCostexPart } from '@/lib/costex-search';
 
 export const dynamic = 'force-dynamic';
 import { prisma } from '@/lib/prisma';
@@ -46,54 +47,29 @@ export async function POST(request: NextRequest) {
 
         // Search only in COSTEX (no Stock Service)
         let costexResults: any[] = [];
-        const baseUrl =
-            process.env.NEXTAUTH_URL ||
-            (typeof request.url === 'string' ? new URL(request.url).origin : null) ||
-            'http://localhost:3000';
         try {
-            const costexResponse = await fetch(`${baseUrl}/api/search/costex`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Cookie': request.headers.get('cookie') || '',
-                },
-                body: JSON.stringify({ partNumber: reference, clientType }),
-            });
+            const costexResult = await searchCostexPart(reference, clientType);
 
-            if (costexResponse.ok) {
-                const costexData = await costexResponse.json();
-                const payload = costexData.data;
-                costexResults = Array.isArray(payload)
-                    ? payload
-                    : payload != null
-                      ? [payload]
-                      : [];
+            if (costexResult.success) {
+                costexResults = costexResult.data;
                 console.log('[SEARCH] Costex result:', {
-                    success: costexData.success,
+                    success: true,
                     partNumber: costexResults[0]?.partNumber ?? reference,
                     totalStock: costexResults[0]?.totalStock ?? 0,
                     minPriceUSD: costexResults[0]?.minPriceUSD,
                     hasData: costexResults.length > 0,
                 });
             } else {
-                const errorBody = await costexResponse.text();
-                const isJson = errorBody.trim().startsWith('{');
-                console.warn('[SEARCH] Costex response not OK:', {
-                    status: costexResponse.status,
-                    baseUrl,
-                    isJsonResponse: isJson,
-                    body: errorBody?.substring(0, 300),
+                console.warn('[SEARCH] Costex search failed:', {
+                    status: costexResult.status,
+                    error: costexResult.error,
+                    found: costexResult.found,
                 });
-                if (!isJson && costexResponse.status === 404) {
-                    console.warn('[SEARCH] Got HTML 404 — internal URL may be wrong. Ensure NEXTAUTH_URL matches the app origin or the app runs on the fallback port.');
-                }
             }
         } catch (error: any) {
             console.error('Costex API call failed:', {
                 message: error.message,
                 code: error.code,
-                baseUrl,
-                target: `${baseUrl}/api/search/costex`
             });
         }
 

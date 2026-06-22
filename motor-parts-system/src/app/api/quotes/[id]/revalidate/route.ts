@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import { searchCostexPart } from '@/lib/costex-search';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -79,24 +80,13 @@ export async function POST(
 
             try {
                 if (origin === 'costex') {
-                    // Re-consultar Costex
-                    const response = await fetch(`${process.env.NEXTAUTH_URL}/api/search/costex`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            partNumber: reference,
-                            clientType: quote.clientType,
-                        }),
-                    });
+                    const costexResult = await searchCostexPart(
+                        reference,
+                        quote.clientType ?? undefined
+                    );
 
-                    if (response.ok) {
-                        const data = await response.json();
-                        const payload = data.data;
-                        const rows = Array.isArray(payload)
-                            ? payload
-                            : payload != null
-                              ? [payload]
-                              : [];
+                    if (costexResult.success) {
+                        const rows = costexResult.data;
                         const preferred = item.costexLocationCode as string | undefined;
                         const picked = pickCostexRowForItem(rows, preferred);
                         if (picked) {
