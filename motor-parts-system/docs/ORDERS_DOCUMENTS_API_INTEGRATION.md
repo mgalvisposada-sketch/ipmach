@@ -1,6 +1,6 @@
 # Orders – Documents API Integration
 
-When an order is created in the Motor Parts System, it is pushed to the **Documents API** (external software) so the order exists in both systems. Each order line is sent with:
+When an order is created in the Motor Parts System, it is pushed to the **Documents API** (external software) so the order exists in both systems. The request identifies point of sale `1`, allowing the Documents API to apply that POS stock policy (including `allowZeroStock`). Each order line is sent with:
 
 - **`price`**: Unit selling price (with profit applied).
 - **`cost`**: Unit cost of the product (before profit). Used by the other software for margin and accounting.
@@ -117,6 +117,7 @@ curl -X POST "${DOCUMENTS_API_BASE_URL}/api/v1/orders" \
       "name": "Cliente Ejemplo",
       "phone": "+57 300 123 4567"
     },
+    "pointSale": { "pointSaleId": 1 },
     "items": [
       { "productId": 1, "quantity": 2, "price": 99.50, "cost": 60.00 },
       { "productId": 2, "quantity": 1, "price": 150.00, "cost": 90.00 }
@@ -133,6 +134,7 @@ curl -X POST "${DOCUMENTS_API_BASE_URL}/api/v1/orders" \
 | `customer.terceroId` | Client identifier in the other system (e.g. `CLI{id}` or tax ID). |
 | `customer.name` | Client name. |
 | `customer.phone` | Client phone (optional). |
+| `pointSale.pointSaleId` | Point of sale used by the Documents API to apply its stock policy. The integration sends `1`. |
 | `items[].productId` | Product ID in the Documents API (from `GET /api/v1/products?reference=...` or product creation). |
 | `items[].quantity` | Quantity ordered. |
 | `items[].price` | **Unit selling price** (with profit). |

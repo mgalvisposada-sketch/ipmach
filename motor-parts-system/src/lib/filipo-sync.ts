@@ -202,6 +202,7 @@ export async function pushOrderToFilipo(
 
   const payload = {
     customer: { terceroId, name: customerName, phone: customerPhone },
+    pointSale: { pointSaleId: 1 },
     items,
     notes: (order.observations ?? '').trim() || 'Pedido desde API',
     status: 'created',
