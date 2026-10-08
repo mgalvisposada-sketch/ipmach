@@ -62,6 +62,11 @@ export interface GenerateOrderPdfOptions {
     discountPercent: number;
     total: number;
   };
+  /**
+   * When true, print item.description as returned by the source (e.g. Filipo) —
+   * do not prefix brand or rewrite Costex → Importacion.
+   */
+  useSourceProductNames?: boolean;
 }
 
 function toNum(value: unknown): number {
@@ -219,6 +224,7 @@ export async function generateOrderPdfBuffer(
   const rightDetailCaption =
     options.rightDetailCaption ?? 'Valid per applicable terms and conditions';
   const showDispatchAndPaymentDetails = options.showDispatchAndPaymentDetails !== false;
+  const useSourceProductNames = options.useSourceProductNames === true;
 
   const pdfDoc = await PDFDocument.create();
   let currentPage = pdfDoc.addPage([595.28, 841.89]);
@@ -429,9 +435,14 @@ export async function generateOrderPdfBuffer(
     }
 
     let description = typeof item.description === 'string' ? item.description : '';
-    const brand = typeof item.brand === 'string' ? item.brand : '';
-    if (brand) description = description ? `${brand} - ${description}` : brand;
-    description = (description as string).replace(/Costex/gi, 'Importacion');
+    if (!useSourceProductNames) {
+      const brand = typeof item.brand === 'string' ? item.brand : '';
+      if (brand) description = description ? `${brand} - ${description}` : brand;
+      description = (description as string).replace(/Costex/gi, 'Importacion');
+    } else if (!description) {
+      // Source name missing: fall back to brand alone without inventing a label
+      description = typeof item.brand === 'string' ? item.brand : '';
+    }
     description = sanitizeTextForPDF(description);
     const truncatedDesc = description.length > 35 ? description.substring(0, 35) + '...' : description;
     currentPage.drawText(truncatedDesc, {

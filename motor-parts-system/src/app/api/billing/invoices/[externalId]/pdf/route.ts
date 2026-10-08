@@ -211,6 +211,7 @@ export async function GET(
       rightDetailCaption: 'Subject to applicable commercial terms',
       showDispatchAndPaymentDetails: false,
       totalsOverride: detail.totalsOverride,
+      useSourceProductNames: true,
     });
 
     const safeName = String(externalId).replace(/[^a-zA-Z0-9._-]/g, '_');
