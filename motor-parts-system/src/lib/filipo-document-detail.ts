@@ -62,6 +62,11 @@ export type FilipoDocumentLineForPdf = {
   totalPrice: number;
 };
 
+type NormalizedLine = FilipoDocumentLineForPdf & {
+  /** Filipo product external id (`pro`) — not the part reference. */
+  productId?: number;
+};
+
 export type FilipoDocumentDetailForPdf = {
   clientName: string | null;
   /** Document date for PDF */
@@ -77,12 +82,225 @@ export type FilipoDocumentDetailForPdf = {
   };
 };
 
-function normalizeLine(raw: unknown): FilipoDocumentLineForPdf | null {
+/** Legacy Motor→Filipo product name: "Producto 7G8430" → "7G8430" */
+function extractReferenceFromProductoLabel(description: string): string {
+  const m = description.match(/^Producto\s+(.+)$/i);
+  return m?.[1]?.trim() || '';
+}
+
+function isPlaceholderProductoName(description: string): boolean {
+  return /^Producto\s+\S+/i.test(description.trim());
+}
+
+function productListFromResponse(body: unknown): Record<string, unknown>[] {
+  if (!body || typeof body !== 'object') return [];
+  const b = body as Record<string, unknown>;
+  const list = Array.isArray(b.data)
+    ? b.data
+    : Array.isArray(b.products)
+      ? b.products
+      : Array.isArray(b)
+        ? b
+        : [];
+  return list.filter((p): p is Record<string, unknown> => !!p && typeof p === 'object');
+}
+
+function productFields(p: Record<string, unknown>): { id: number | null; reference: string; name: string } {
+  const idRaw = p.externalId ?? p.productId ?? p.ProductID ?? p.productID ?? p.id;
+  const id =
+    typeof idRaw === 'number' && Number.isFinite(idRaw)
+      ? idRaw
+      : typeof idRaw === 'string' && idRaw.trim() !== '' && Number.isFinite(Number(idRaw))
+        ? Number(idRaw)
+        : null;
+  const reference = pickString(p, ['reference', 'Reference', 'sku', 'code', 'referencia']);
+  const name = pickString(p, ['name', 'Name', 'description', 'productName', 'des', 'title']);
+  return { id, reference, name };
+}
+
+async function fetchFilipoProductByReference(
+  base: string,
+  token: string,
+  reference: string
+): Promise<{ reference: string; name: string } | null> {
+  const url = `${base}/api/v1/products?reference=${encodeURIComponent(reference)}`;
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      { method: 'GET', headers: { Accept: 'application/json', 'X-API-Token': token } },
+      FETCH_TIMEOUT_MS
+    );
+    if (!res.ok) return null;
+    const body = await res.json();
+    const list = productListFromResponse(body);
+    const match = list.find((p) => {
+      const f = productFields(p);
+      return f.reference.toLowerCase() === reference.toLowerCase();
+    });
+    if (!match) return null;
+    const f = productFields(match);
+    if (!f.reference && !f.name) return null;
+    return { reference: f.reference || reference, name: f.name };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFilipoProductById(
+  base: string,
+  token: string,
+  productId: number
+): Promise<{ reference: string; name: string } | null> {
+  const candidates = [
+    `${base}/api/v1/products/${encodeURIComponent(String(productId))}`,
+    `${base}/api/v1/products?externalId=${encodeURIComponent(String(productId))}`,
+    `${base}/api/v1/products?id=${encodeURIComponent(String(productId))}`,
+  ];
+  for (const url of candidates) {
+    try {
+      const res = await fetchWithTimeout(
+        url,
+        { method: 'GET', headers: { Accept: 'application/json', 'X-API-Token': token } },
+        FETCH_TIMEOUT_MS
+      );
+      if (!res.ok) continue;
+      const body = await res.json();
+      const list = productListFromResponse(body);
+      const single =
+        list.length > 0
+          ? list.find((p) => productFields(p).id === productId) ?? list[0]
+          : body && typeof body === 'object'
+            ? ((body as { data?: unknown }).data &&
+              typeof (body as { data: unknown }).data === 'object' &&
+              !Array.isArray((body as { data: unknown }).data)
+                ? ((body as { data: Record<string, unknown> }).data)
+                : (body as Record<string, unknown>).product &&
+                    typeof (body as { product: unknown }).product === 'object'
+                  ? ((body as { product: Record<string, unknown> }).product)
+                  : (body as Record<string, unknown>))
+            : null;
+      if (!single || typeof single !== 'object') continue;
+      const f = productFields(single as Record<string, unknown>);
+      if (f.reference || f.name) {
+        return { reference: f.reference, name: f.name };
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve part reference + real product name from Filipo product master.
+ * Sale lines often send `pro` (product id) and legacy `des` ("Producto {ref}").
+ */
+async function enrichLinesFromFilipoProducts(
+  lines: NormalizedLine[]
+): Promise<FilipoDocumentLineForPdf[]> {
+  const config = getDocumentsApiConfig();
+  if (!config || lines.length === 0) {
+    return lines.map(({ productId: _pid, ...rest }) => rest);
+  }
+
+  const byRef = new Map<string, { reference: string; name: string } | null>();
+  const byId = new Map<number, { reference: string; name: string } | null>();
+
+  const enriched: FilipoDocumentLineForPdf[] = [];
+  for (const line of lines) {
+    let reference = line.reference;
+    let description = line.description;
+
+    const needsName =
+      !description || isPlaceholderProductoName(description);
+    const needsRef = !reference;
+
+    if ((needsName || needsRef) && reference) {
+      const key = reference.toLowerCase();
+      if (!byRef.has(key)) {
+        byRef.set(key, await fetchFilipoProductByReference(config.baseUrl, config.token, reference));
+      }
+      const product = byRef.get(key);
+      if (product) {
+        if (product.reference) reference = product.reference;
+        if (product.name && (needsName || isPlaceholderProductoName(description))) {
+          description = product.name;
+        }
+      }
+    }
+
+    if (
+      (needsName || needsRef || isPlaceholderProductoName(description)) &&
+      line.productId != null &&
+      Number.isFinite(line.productId)
+    ) {
+      if (!byId.has(line.productId)) {
+        byId.set(
+          line.productId,
+          await fetchFilipoProductById(config.baseUrl, config.token, line.productId)
+        );
+      }
+      const product = byId.get(line.productId);
+      if (product) {
+        if (product.reference && (!reference || reference === String(line.productId))) {
+          reference = product.reference;
+        }
+        if (product.name && (!description || isPlaceholderProductoName(description))) {
+          description = product.name;
+        }
+      }
+    }
+
+    enriched.push({
+      reference,
+      description,
+      brand: line.brand,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      totalPrice: line.totalPrice,
+    });
+  }
+  return enriched;
+}
+
+function normalizeLine(raw: unknown): NormalizedLine | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const reference = pickString(r, ['reference', 'ref', 'productReference', 'sku', 'code', 'pro']);
+
+  // In Filipo sale lines, `pro` is the product external id — never the part reference.
+  const productId = pickNum(r, ['productId', 'product_id', 'ProductID', 'pro']);
+
+  let reference = pickString(r, [
+    'reference',
+    'ref',
+    'productReference',
+    'sku',
+    'code',
+    'referencia',
+  ]);
   const brand = pickString(r, ['brand', 'marca']);
-  let description = pickString(r, ['description', 'name', 'productName', 'detail', 'product', 'title', 'des']);
+  let description = pickString(r, [
+    'description',
+    'name',
+    'productName',
+    'detail',
+    'title',
+    'des',
+  ]);
+
+  // Legacy line label "Producto 7G8430" embeds the real part reference.
+  const fromLabel = extractReferenceFromProductoLabel(description);
+  if (fromLabel) {
+    if (!reference || (productId != null && reference === String(productId))) {
+      reference = fromLabel;
+    }
+  }
+
+  // If reference was wrongly filled with the product id, clear it for enrichment.
+  if (productId != null && reference === String(productId)) {
+    reference = fromLabel || '';
+  }
+
   const quantity = pickNum(r, ['quantity', 'qty', 'cantidad', 'amount', 'can']) ?? 1;
   const unitPrice =
     pickNum(r, ['unitPrice', 'price', 'unit', 'precio', 'valorUnitario', 'valu']) ?? 0;
@@ -90,7 +308,7 @@ function normalizeLine(raw: unknown): FilipoDocumentLineForPdf | null {
     pickNum(r, ['totalPrice', 'lineTotal', 'total', 'importe', 'subtotalLine', 'valt']) ??
     unitPrice * Math.max(quantity, 0);
 
-  if (!description && !reference) return null;
+  if (!description && !reference && productId == null) return null;
 
   return {
     reference,
@@ -99,6 +317,7 @@ function normalizeLine(raw: unknown): FilipoDocumentLineForPdf | null {
     quantity: Math.max(0, quantity),
     unitPrice: Math.max(0, unitPrice),
     totalPrice: Math.max(0, lineTotal),
+    productId: productId != null && productId > 0 ? productId : undefined,
   };
 }
 
@@ -177,12 +396,12 @@ async function fetchFilipoSaleItemsForPdf(
           : 0;
       return (Number.isFinite(pa) ? pa : 0) - (Number.isFinite(pb) ? pb : 0);
     });
-    const items: FilipoDocumentLineForPdf[] = [];
+    const items: NormalizedLine[] = [];
     for (const row of sorted) {
       const line = normalizeLine(row);
       if (line) items.push(line);
     }
-    return items;
+    return enrichLinesFromFilipoProducts(items);
   } catch {
     return [];
   }
@@ -452,11 +671,12 @@ export async function fetchFilipoDocumentDetailForPdf(
     }
 
     const rawItems = extractItems(root);
-    const items: FilipoDocumentLineForPdf[] = [];
+    const normalized: NormalizedLine[] = [];
     for (const row of rawItems) {
       const line = normalizeLine(row);
-      if (line) items.push(line);
+      if (line) normalized.push(line);
     }
+    const items = await enrichLinesFromFilipoProducts(normalized);
 
     const clientName =
       pickString(root, ['clientName', 'customerName', 'name', 'razonSocial']) || null;
