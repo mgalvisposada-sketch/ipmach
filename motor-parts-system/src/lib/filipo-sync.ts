@@ -80,7 +80,7 @@ async function getOrCreateProductInDocumentsApi(
   token: string,
   reference: string,
   unitPrice: number,
-  _description?: string
+  description?: string
 ): Promise<number | null> {
   const base = baseUrl.replace(/\/$/, '');
 
@@ -89,8 +89,9 @@ async function getOrCreateProductInDocumentsApi(
 
   const createUrl = `${base}/api/v1/products`;
   const price = Math.round(unitPrice * 100) / 100;
+  const productName = (description ?? '').trim() || `Producto ${reference}`;
   const body = {
-    name: `Producto ${reference}`,
+    name: productName,
     price,
     stock: 1,
     reference,
