@@ -92,6 +92,40 @@ function isPlaceholderProductoName(description: string): boolean {
   return /^Producto\s+\S+/i.test(description.trim());
 }
 
+/** True when `des` is "Producto X" but the line reference is not X (stale/wrong line label). */
+function isMismatchedProductoLabel(description: string, reference: string): boolean {
+  if (!reference) return false;
+  const fromLabel = extractReferenceFromProductoLabel(description);
+  if (!fromLabel) return false;
+  return fromLabel.toLowerCase() !== reference.toLowerCase();
+}
+
+function refsMatch(a: string, b: string): boolean {
+  return !!a && !!b && a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * PDF display name:
+ * - Filipo Name "Producto {ref}" (placeholder equal to the line reference) → "HARDWARE PARTS {ref}"
+ * - Any other distinct name → keep as-is
+ */
+function displayNameForInvoicePdf(name: string, reference: string): string {
+  const trimmed = (name ?? '').trim();
+  const ref = (reference ?? '').trim();
+  if (!trimmed) {
+    return ref ? `HARDWARE PARTS ${ref}` : '';
+  }
+  const fromLabel = extractReferenceFromProductoLabel(trimmed);
+  if (fromLabel && ref && refsMatch(fromLabel, ref)) {
+    return `HARDWARE PARTS ${ref}`;
+  }
+  // Name is "Producto X" and X is the only identity we have (no separate ref yet)
+  if (fromLabel && !ref) {
+    return `HARDWARE PARTS ${fromLabel}`;
+  }
+  return trimmed;
+}
+
 function productListFromResponse(body: unknown): Record<string, unknown>[] {
   if (!body || typeof body !== 'object') return [];
   const b = body as Record<string, unknown>;
@@ -118,6 +152,49 @@ function productFields(p: Record<string, unknown>): { id: number | null; referen
   return { id, reference, name };
 }
 
+function pickSingleProductFromBody(
+  body: unknown,
+  opts: { productId?: number; reference?: string }
+): { reference: string; name: string } | null {
+  const list = productListFromResponse(body);
+  let match: Record<string, unknown> | null = null;
+
+  if (opts.productId != null) {
+    match = list.find((p) => productFields(p).id === opts.productId) ?? null;
+  }
+  if (!match && opts.reference) {
+    const want = opts.reference.toLowerCase();
+    match =
+      list.find((p) => productFields(p).reference.toLowerCase() === want) ?? null;
+  }
+
+  // Single-object payloads (not a list): only accept if id/reference matches when provided.
+  if (!match && list.length === 0 && body && typeof body === 'object') {
+    const b = body as Record<string, unknown>;
+    const candidate =
+      b.data && typeof b.data === 'object' && !Array.isArray(b.data)
+        ? (b.data as Record<string, unknown>)
+        : b.product && typeof b.product === 'object'
+          ? (b.product as Record<string, unknown>)
+          : b;
+    const f = productFields(candidate);
+    const idOk = opts.productId == null || f.id === opts.productId;
+    const refOk = !opts.reference || refsMatch(f.reference, opts.reference);
+    if ((f.reference || f.name) && idOk && refOk) {
+      match = candidate;
+    }
+  }
+
+  if (!match) return null;
+  const f = productFields(match);
+  if (!f.reference && !f.name) return null;
+  // Never return a product whose reference disagrees with the requested line reference.
+  if (opts.reference && f.reference && !refsMatch(f.reference, opts.reference)) {
+    return null;
+  }
+  return { reference: f.reference || opts.reference || '', name: f.name };
+}
+
 async function fetchFilipoProductByReference(
   base: string,
   token: string,
@@ -132,15 +209,7 @@ async function fetchFilipoProductByReference(
     );
     if (!res.ok) return null;
     const body = await res.json();
-    const list = productListFromResponse(body);
-    const match = list.find((p) => {
-      const f = productFields(p);
-      return f.reference.toLowerCase() === reference.toLowerCase();
-    });
-    if (!match) return null;
-    const f = productFields(match);
-    if (!f.reference && !f.name) return null;
-    return { reference: f.reference || reference, name: f.name };
+    return pickSingleProductFromBody(body, { reference });
   } catch {
     return null;
   }
@@ -149,7 +218,8 @@ async function fetchFilipoProductByReference(
 async function fetchFilipoProductById(
   base: string,
   token: string,
-  productId: number
+  productId: number,
+  expectedReference?: string
 ): Promise<{ reference: string; name: string } | null> {
   const candidates = [
     `${base}/api/v1/products/${encodeURIComponent(String(productId))}`,
@@ -165,25 +235,12 @@ async function fetchFilipoProductById(
       );
       if (!res.ok) continue;
       const body = await res.json();
-      const list = productListFromResponse(body);
-      const single =
-        list.length > 0
-          ? list.find((p) => productFields(p).id === productId) ?? list[0]
-          : body && typeof body === 'object'
-            ? ((body as { data?: unknown }).data &&
-              typeof (body as { data: unknown }).data === 'object' &&
-              !Array.isArray((body as { data: unknown }).data)
-                ? ((body as { data: Record<string, unknown> }).data)
-                : (body as Record<string, unknown>).product &&
-                    typeof (body as { product: unknown }).product === 'object'
-                  ? ((body as { product: Record<string, unknown> }).product)
-                  : (body as Record<string, unknown>))
-            : null;
-      if (!single || typeof single !== 'object') continue;
-      const f = productFields(single as Record<string, unknown>);
-      if (f.reference || f.name) {
-        return { reference: f.reference, name: f.name };
-      }
+      // Strict: only accept a product that matches this id (never fall back to list[0]).
+      const product = pickSingleProductFromBody(body, {
+        productId,
+        reference: expectedReference,
+      });
+      if (product) return product;
     } catch {
       // try next candidate
     }
@@ -193,14 +250,17 @@ async function fetchFilipoProductById(
 
 /**
  * Resolve part reference + real product name from Filipo product master.
- * Sale lines often send `pro` (product id) and legacy `des` ("Producto {ref}").
+ * Sale lines often send `pro` (product id) and a stale/wrong `des` ("Producto {otherRef}").
  */
 async function enrichLinesFromFilipoProducts(
   lines: NormalizedLine[]
 ): Promise<FilipoDocumentLineForPdf[]> {
   const config = getDocumentsApiConfig();
   if (!config || lines.length === 0) {
-    return lines.map(({ productId: _pid, ...rest }) => rest);
+    return lines.map(({ productId: _pid, ...rest }) => ({
+      ...rest,
+      description: displayNameForInvoicePdf(rest.description, rest.reference),
+    }));
   }
 
   const byRef = new Map<string, { reference: string; name: string } | null>();
@@ -211,10 +271,22 @@ async function enrichLinesFromFilipoProducts(
     let reference = line.reference;
     let description = line.description;
 
+    // Drop labels that belong to another reference (e.g. all lines saying "Producto 6E1478").
+    if (isMismatchedProductoLabel(description, reference)) {
+      description = '';
+    }
+
+    const descriptionMatchesLineRef =
+      !!reference &&
+      isPlaceholderProductoName(description) &&
+      refsMatch(extractReferenceFromProductoLabel(description), reference);
+
     const needsName =
-      !description || isPlaceholderProductoName(description);
+      !description ||
+      (isPlaceholderProductoName(description) && !descriptionMatchesLineRef);
     const needsRef = !reference;
 
+    // Prefer lookup by the line's own part reference (authoritative for PDF).
     if ((needsName || needsRef) && reference) {
       const key = reference.toLowerCase();
       if (!byRef.has(key)) {
@@ -223,14 +295,17 @@ async function enrichLinesFromFilipoProducts(
       const product = byRef.get(key);
       if (product) {
         if (product.reference) reference = product.reference;
-        if (product.name && (needsName || isPlaceholderProductoName(description))) {
-          description = product.name;
-        }
+        if (product.name) description = product.name;
+      } else if (!description) {
+        // Lookup failed: placeholder for this line only; displayNameForInvoicePdf renames it.
+        description = `Producto ${reference}`;
       }
     }
 
+    // productId lookup only when we still lack a reference (never overwrite a good per-ref name).
     if (
-      (needsName || needsRef || isPlaceholderProductoName(description)) &&
+      needsRef &&
+      !reference &&
       line.productId != null &&
       Number.isFinite(line.productId)
     ) {
@@ -242,18 +317,14 @@ async function enrichLinesFromFilipoProducts(
       }
       const product = byId.get(line.productId);
       if (product) {
-        if (product.reference && (!reference || reference === String(line.productId))) {
-          reference = product.reference;
-        }
-        if (product.name && (!description || isPlaceholderProductoName(description))) {
-          description = product.name;
-        }
+        if (product.reference) reference = product.reference;
+        if (product.name) description = product.name;
       }
     }
 
     enriched.push({
       reference,
-      description,
+      description: displayNameForInvoicePdf(description, reference),
       brand: line.brand,
       quantity: line.quantity,
       unitPrice: line.unitPrice,
@@ -288,17 +359,20 @@ function normalizeLine(raw: unknown): NormalizedLine | null {
     'des',
   ]);
 
-  // Legacy line label "Producto 7G8430" embeds the real part reference.
+  // Only mine reference from "Producto X" when the line has no part reference of its own.
+  // Never steal X from a mismatched label when reference is already set (e.g. 2592627 vs "Producto 6E1478").
   const fromLabel = extractReferenceFromProductoLabel(description);
   if (fromLabel) {
     if (!reference || (productId != null && reference === String(productId))) {
       reference = fromLabel;
+    } else if (isMismatchedProductoLabel(description, reference)) {
+      description = '';
     }
   }
 
-  // If reference was wrongly filled with the product id, clear it for enrichment.
+  // If reference was wrongly filled with the Filipo product id, clear for enrichment.
   if (productId != null && reference === String(productId)) {
-    reference = fromLabel || '';
+    reference = '';
   }
 
   const quantity = pickNum(r, ['quantity', 'qty', 'cantidad', 'amount', 'can']) ?? 1;
