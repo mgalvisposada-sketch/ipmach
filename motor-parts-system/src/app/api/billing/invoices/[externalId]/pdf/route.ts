@@ -162,6 +162,17 @@ export async function GET(
       totalPrice: it.totalPrice,
     }));
 
+    const lineSubtotal =
+      Math.round(itemsPayload.reduce((sum, it) => sum + (Number(it.totalPrice) || 0), 0) * 100) / 100;
+    const discountAmount = detail.totalsOverride?.discountAmount ?? 0;
+    const discountPercent = detail.totalsOverride?.discountPercent ?? 0;
+    const totalsFromLines = {
+      subtotal: lineSubtotal,
+      discountAmount,
+      discountPercent,
+      total: Math.max(0, Math.round((lineSubtotal - discountAmount) * 100) / 100),
+    };
+
     const numericRef = Number(externalId);
     const pseudoOrderId = Number.isFinite(numericRef) ? Math.floor(numericRef) : userId;
 
@@ -174,7 +185,7 @@ export async function GET(
       items: itemsPayload,
       status: 'completed',
       createdAt: detail.documentDate,
-      totalAmount: detail.totalsOverride?.total ?? 0,
+      totalAmount: totalsFromLines.total,
       discountPercent: detail.totalsOverride?.discountPercent ?? 0,
       discountAmount: detail.totalsOverride?.discountAmount ?? 0,
       observations: detail.observations,
@@ -210,7 +221,7 @@ export async function GET(
       dateLabel: 'Date:',
       rightDetailCaption: 'Subject to applicable commercial terms',
       showDispatchAndPaymentDetails: false,
-      totalsOverride: detail.totalsOverride,
+      totalsOverride: totalsFromLines,
       useSourceProductNames: true,
     });
 

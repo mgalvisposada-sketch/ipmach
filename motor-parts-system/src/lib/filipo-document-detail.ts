@@ -295,12 +295,16 @@ function normalizeLine(raw: unknown): NormalizedLine | null {
     reference = '';
   }
 
-  const quantity = pickNum(r, ['quantity', 'qty', 'cantidad', 'amount', 'can']) ?? 1;
-  const unitPrice =
-    pickNum(r, ['unitPrice', 'price', 'unit', 'precio', 'valorUnitario', 'valu']) ?? 0;
-  const lineTotal =
-    pickNum(r, ['totalPrice', 'lineTotal', 'total', 'importe', 'subtotalLine', 'valt']) ??
-    unitPrice * Math.max(quantity, 0);
+  // Sale lines: `can` is quantity and `valu`/`val` is unit price.
+  // Do not use `quantity` or `price` first — those are stock and catalog price when a product is joined.
+  const quantity = pickNum(r, ['can', 'qty', 'cantidad']) ?? pickNum(r, ['quantity']) ?? 1;
+  const rawUnit =
+    pickNum(r, ['valu', 'val', 'valorUnitario', 'unitPrice']) ??
+    pickNum(r, ['precio', 'unit', 'price']) ??
+    0;
+  const unitPrice = Math.round(rawUnit * 100) / 100;
+  // Printed total is always quantity × unit price, so the row adds up.
+  const lineTotal = Math.round(unitPrice * Math.max(quantity, 0) * 100) / 100;
 
   if (!description && !reference && productId == null) return null;
 
